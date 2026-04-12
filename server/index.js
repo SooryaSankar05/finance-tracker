@@ -6,7 +6,16 @@ const connectDB = require("./config/db");
 const app = express();
 
 console.log("GEMINI KEY:", process.env.GEMINI_API_KEY);
-app.use(cors({ origin: "*", credentials: true }));
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://YOUR-PROJECT-ID.web.app",
+      "https://YOUR-PROJECT-ID.firebaseapp.com",
+    ],
+    credentials: true,
+  }),
+);
 app.use(express.json({ limit: "20mb" }));
 
 connectDB();
