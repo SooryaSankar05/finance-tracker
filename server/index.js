@@ -10,8 +10,8 @@ app.use(
   cors({
     origin: [
       "http://localhost:3000",
-      "https://finance-tracker-2sjy.web.app", // your firebase URL
-      "https://finance-tracker-2sjy.firebaseapp.com",
+      "https://finance-tracker-f62de.web.app",
+      "https://finance-tracker-f62de.firebaseapp.com",
     ],
     credentials: true,
   }),
