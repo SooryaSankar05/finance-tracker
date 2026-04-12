@@ -1,52 +1,56 @@
 import { useState, useRef, useEffect } from "react";
 import API from "../services/api";
 import { useTheme } from "../context/ThemeContext";
-import { Send, Bot, User, Sparkles } from "lucide-react";
-import ReactMarkdown from "react-markdown"; // ✅ ADDED
+import { Bot, User } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 
 const SUGGESTIONS = [
   "How can I reduce my spending?",
-  "Where did I spend the most this month?",
-  "Am I saving enough?",
-  "What spending patterns do you see?",
-  "Give me a full spending summary",
-  "Which category should I cut back on?",
-  "How does my income compare to expenses?",
-  "What are my top 3 expenses?",
+  "Give me budgeting tips",
+  "How to save money?",
 ];
 
 const buildSystemPrompt = (ctx) => {
-  if (!ctx)
-    return "You are MoneyMind, a helpful personal finance assistant for Indian users.";
-  const rate =
-    ctx.totalIncome > 0
-      ? (
-          ((ctx.totalIncome - ctx.totalExpense) / ctx.totalIncome) *
-          100
-        ).toFixed(1)
-      : 0;
+  if (!ctx) {
+    return "You are MoneyMind. The user has no transaction data yet. Help them with general financial advice.";
+  }
 
-  return `You are MoneyMind...`; // (kept same for brevity)
+  return `You are MoneyMind, a finance assistant.`;
 };
 
 export default function AIAssistant() {
   const { t } = useTheme();
-  const [messages, setMessages] = useState([]);
+
+  const [messages, setMessages] = useState([
+    {
+      role: "assistant",
+      content:
+        "Hi 👋 I'm your AI assistant. Ask me anything about your finances.",
+    },
+  ]);
+
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [context, setContext] = useState(null);
   const [ctxLoading, setCtxLoading] = useState(true);
+
   const bottomRef = useRef(null);
 
+  // 🔥 FETCH CONTEXT
   useEffect(() => {
     API.get("/transactions/ai-context")
       .then((r) => {
+        console.log("AI CONTEXT:", r.data);
         setContext(r.data);
         setCtxLoading(false);
       })
-      .catch(() => setCtxLoading(false));
+      .catch((err) => {
+        console.error("AI ERROR:", err.response || err);
+        setCtxLoading(false);
+      });
   }, []);
 
+  // 🔥 AUTO SCROLL
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
@@ -54,6 +58,7 @@ export default function AIAssistant() {
   const send = async (text) => {
     const msg = (text || input).trim();
     if (!msg) return;
+
     setInput("");
 
     const newMsgs = [...messages, { role: "user", content: msg }];
@@ -62,17 +67,19 @@ export default function AIAssistant() {
 
     try {
       const res = await API.post("/transactions/chat", {
-        messages: newMsgs.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
+        messages: newMsgs,
         systemPrompt: buildSystemPrompt(context),
       });
 
       const reply = res.data?.content?.[0]?.text;
-      if (!reply) throw new Error("Empty response");
 
-      setMessages([...newMsgs, { role: "assistant", content: reply }]);
+      setMessages([
+        ...newMsgs,
+        {
+          role: "assistant",
+          content: reply || "No response from AI",
+        },
+      ]);
     } catch (err) {
       const errMsg =
         err.response?.data?.error || err.message || "Something went wrong";
@@ -83,6 +90,11 @@ export default function AIAssistant() {
     }
   };
 
+  // 🔥 LOADING STATE (NO BLANK SCREEN)
+  if (ctxLoading) {
+    return <div style={{ padding: 20 }}>Loading AI...</div>;
+  }
+
   return (
     <div
       style={{
@@ -92,8 +104,32 @@ export default function AIAssistant() {
         flexDirection: "column",
       }}
     >
-      {/* HEADER (unchanged) */}
+      {/* 🔥 EMPTY DATA MESSAGE */}
+      {!context && (
+        <div style={{ padding: 12, color: "gray" }}>
+          No financial data yet. Add transactions or connect SMS.
+        </div>
+      )}
 
+      {/* 🔥 SUGGESTIONS */}
+      {messages.length === 1 && (
+        <div style={{ padding: 10 }}>
+          <strong>Try asking:</strong>
+          <ul>
+            {SUGGESTIONS.map((s, i) => (
+              <li
+                key={i}
+                style={{ cursor: "pointer", marginBottom: 5 }}
+                onClick={() => send(s)}
+              >
+                {s}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 🔥 CHAT AREA */}
       <div
         style={{
           flex: 1,
@@ -111,92 +147,39 @@ export default function AIAssistant() {
               display: "flex",
               justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
               gap: "7px",
-              alignItems: "flex-start",
             }}
           >
-            {msg.role === "assistant" && (
-              <div
-                style={{
-                  width: "28px",
-                  height: "28px",
-                  borderRadius: "8px",
-                  background: t.greenBg,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Bot size={14} color={t.green} />
-              </div>
-            )}
+            {msg.role === "assistant" && <Bot size={18} />}
 
             <div
               style={{
                 maxWidth: "76%",
                 background: msg.role === "user" ? t.green : t.surface,
                 color: msg.role === "user" ? "#fff" : t.text,
-                borderRadius:
-                  msg.role === "user"
-                    ? "13px 13px 4px 13px"
-                    : "13px 13px 13px 4px",
-                padding: "10px 14px",
-                fontSize: "13px",
-                border: msg.role === "user" ? "none" : `1px solid ${t.border}`,
+                borderRadius: "10px",
+                padding: "10px",
               }}
             >
-              {/* ✅ MARKDOWN RENDERING ADDED HERE */}
-              <div style={{ lineHeight: "1.7", color: t.text }}>
-                <ReactMarkdown
-                  components={{
-                    p: ({ children }) => (
-                      <p style={{ marginBottom: "8px" }}>{children}</p>
-                    ),
-                    strong: ({ children }) => (
-                      <strong style={{ fontWeight: 600 }}>{children}</strong>
-                    ),
-                    li: ({ children }) => (
-                      <li style={{ marginBottom: "4px" }}>{children}</li>
-                    ),
-                    ul: ({ children }) => (
-                      <ul
-                        style={{
-                          paddingLeft: "20px",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        {children}
-                      </ul>
-                    ),
-                  }}
-                >
-                  {msg.content}
-                </ReactMarkdown>
-              </div>
+              <ReactMarkdown>{msg.content}</ReactMarkdown>
             </div>
 
-            {msg.role === "user" && (
-              <div
-                style={{
-                  width: "28px",
-                  height: "28px",
-                  borderRadius: "8px",
-                  background: t.surface,
-                  border: `1px solid ${t.border}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <User size={14} color={t.textSub} />
-              </div>
-            )}
+            {msg.role === "user" && <User size={18} />}
           </div>
         ))}
 
         <div ref={bottomRef} />
       </div>
 
-      {/* INPUT BOX (unchanged) */}
+      {/* 🔥 INPUT */}
+      <div style={{ display: "flex", padding: 10 }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask something..."
+          style={{ flex: 1, padding: 10 }}
+        />
+        <button onClick={() => send()}>Send</button>
+      </div>
     </div>
   );
 }
