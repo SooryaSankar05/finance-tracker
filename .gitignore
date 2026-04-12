@@ -1,0 +1,17 @@
+# Root gitignore — covers both client and server
+node_modules/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/settings.json
+*.log
+logs/
+dist/
+build/
+
+# Never commit secrets
+.env
+*.env
+.env.local
+.env.production
+.env.development
