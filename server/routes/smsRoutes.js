@@ -131,43 +131,38 @@ router.get("/last-sync", auth, async (req, res) => {
 
 // ---------- SMS FORWARDER WEBHOOK (JWT BASED) ----------
 
-router.post("/webhook", async (req, res) => {
-  try {
-    const { text, from, token } = req.body;
+router.post("/", async (req, res) => {
+  console.log("🔥 HIT API", req.body);
 
-    // 🔐 Validate token
-    if (!token) {
-      return res.status(401).json({ error: "No token provided" });
-    }
+  const { sender, message } = req.body;
 
-    let userId;
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      userId = decoded.id;
-    } catch (err) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
-    // Ignore non-financial SMS
-    if (!text || extractAmount(text) === 0) {
-      return res.json({ message: "Not financial SMS, skipped" });
-    }
-
-    const tx = await Transaction.create({
-      text,
-      amount: extractAmount(text),
-      category: categorize(text),
-      type: text.toLowerCase().includes("credited") ? "income" : "expense",
-      merchant: extractMerchant(text),
-      note: from || "",
-      user: userId, // ✅ dynamic user
-      date: new Date(),
-    });
-
-    res.json({ ok: true, transaction: tx._id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  if (!message) {
+    return res.status(400).json({ error: "No message" });
   }
+
+  // 🔍 Filter: Only process financial SMS
+  if (!isBankSMS(message, sender)) {
+    return res.json({ skipped: true, reason: "Not bank SMS" });
+  }
+
+  const amount = extractAmount(message);
+
+  if (!amount || amount === 0) {
+    return res.json({ skipped: true, reason: "No valid amount" });
+  }
+
+  const tx = await Transaction.create({
+    text: message,
+    amount,
+    category: categorize(message),
+    type: detectType(message),
+    merchant: extractMerchant(message),
+    note: sender || "",
+    user: "test-user",
+    date: new Date(),
+  });
+
+  res.json({ ok: true, id: tx._id });
 });
 
 module.exports = router;
