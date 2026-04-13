@@ -37,60 +37,47 @@ router.post("/chat", auth, async (req, res) => {
     if (!apiKey) {
       return res.status(500).json({
         error:
-          "GEMINI_API_KEY not configured on server. Add it to your Render environment variables.",
+          "GEMINI_API_KEY not set. Get your free key at https://aistudio.google.com/app/apikey then add it to server/.env",
       });
     }
 
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: "messages array is required" });
+    // Convert messages — drop any leading assistant message since
+    // Gemini requires the conversation to start with "user" role
+    const filtered = messages.filter((m) => m.role && m.content);
+    let startIdx = 0;
+    while (
+      startIdx < filtered.length &&
+      filtered[startIdx].role === "assistant"
+    ) {
+      startIdx++;
     }
+    const contents = filtered.slice(startIdx).map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
 
-    // Convert to Gemini format (assistant -> model)
-    let contents = messages
-      .filter((m) => m.role && m.content)
-      .map((m) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: String(m.content) }],
-      }));
-
-    // Gemini requires conversation to start with "user" role — drop any leading model messages
-    while (contents.length > 0 && contents[0].role === "model") {
-      contents = contents.slice(1);
-    }
     if (contents.length === 0) {
-      contents = [{ role: "user", parts: [{ text: "Hello" }] }];
+      return res.status(400).json({ error: "No valid messages to send" });
     }
 
     const body = JSON.stringify({
-      system_instruction: {
-        parts: [
-          {
-            text:
-              systemPrompt ||
-              "You are MoneyMind, a helpful personal finance assistant.",
-          },
-        ],
-      },
+      system_instruction: { parts: [{ text: systemPrompt }] },
       contents,
-      generationConfig: {
-        maxOutputTokens: 1024,
-        temperature: 0.7,
-      },
+      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
     });
 
-    // ✅ FIXED MODEL LIST — only models confirmed to work on v1beta
-    // Removed: gemini-1.5-flash-8b (not on v1beta), gemini-2.5-flash (preview, unstable)
+    // ✅ FIXED model list — gemini-1.5-flash replaced with gemini-2.0-flash-lite
+    // gemini-1.5-flash returns 404 on v1beta as of 2026
     const MODELS = [
-      "gemini-2.0-flash", // best free tier — fast and reliable
-      "gemini-1.5-flash", // proven fallback
-      "gemini-2.0-flash-lite", // lightweight last resort
+      "gemini-2.5-flash", // best — worked on your localhost
+      "gemini-2.0-flash", // reliable fallback
+      "gemini-2.0-flash-lite", // lightweight last resort (replaces broken gemini-1.5-flash)
     ];
 
     let lastError = null;
 
     for (const model of MODELS) {
       try {
-        console.log(`Trying Gemini model: ${model}`);
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
           {
@@ -103,36 +90,29 @@ router.post("/chat", auth, async (req, res) => {
         const data = await response.json();
 
         if (!response.ok || data.error) {
-          const errMsg =
-            data.error?.message || `${model} returned HTTP ${response.status}`;
-          console.warn(`Model ${model} failed: ${errMsg}`);
-          lastError = errMsg;
+          console.warn(`Model ${model} failed:`, data.error?.message);
+          lastError = data.error?.message || `${model} failed`;
           continue;
         }
 
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
         if (!text) {
-          const finishReason = data.candidates?.[0]?.finishReason;
-          lastError = finishReason
-            ? `Response blocked (${finishReason})`
-            : "Empty response from Gemini";
-          console.warn(`Model ${model}: ${lastError}`);
+          lastError = "Empty response from Gemini";
           continue;
         }
 
-        console.log(`✅ AI responded using model: ${model}`);
+        console.log(`AI responded using model: ${model}`);
         return res.json({ content: [{ type: "text", text }] });
       } catch (fetchErr) {
-        console.warn(`Fetch error for ${model}:`, fetchErr.message);
+        console.warn(`Fetch error for model ${model}:`, fetchErr.message);
         lastError = fetchErr.message;
         continue;
       }
     }
 
-    console.error("All Gemini models failed. Last error:", lastError);
+    // All models failed
     return res.status(500).json({
-      error: `AI unavailable right now. Please try again in a moment.`,
+      error: `All Gemini models failed. Last error: ${lastError}. Check your API key at aistudio.google.com`,
     });
   } catch (err) {
     console.error("Chat route error:", err.message);
