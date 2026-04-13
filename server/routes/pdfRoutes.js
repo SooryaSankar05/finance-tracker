@@ -1,379 +1,361 @@
 // FILE: server/routes/pdfRoutes.js
-// Parses HDFC (and similar) bank statement PDFs server-side
-// Much more reliable than browser-side PDF.js parsing
+// REPLACE your existing pdfRoutes.js with this entire file
 
 const express = require("express");
 const router = express.Router();
-const auth = require("../middleware/auth");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
+const auth = require("../middleware/auth");
 const Transaction = require("../models/Transaction");
-const extractMerchant = require("../utils/extractMerchant");
 const categorize = require("../utils/categorize");
+const extractMerchant = require("../utils/extractMerchant");
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
-// ── Detect transaction type ─────────────────────────────
-function detectType(narration, withdrawalAmt, depositAmt) {
-  const w = parseFloat(withdrawalAmt) || 0;
-  const d = parseFloat(depositAmt) || 0;
-  if (d > 0 && w === 0) return "income";
-  const n = (narration || "").toLowerCase();
-  if (
-    n.includes("credited") ||
-    n.includes("salary") ||
-    n.includes("refund") ||
-    n.includes("cashback")
-  )
-    return "income";
-  return "expense";
-}
+// ─────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────
 
-// ── Parse amount string ─────────────────────────────────
 function parseAmount(str) {
   if (!str) return 0;
-  const clean = str.replace(/,/g, "").trim();
-  const num = parseFloat(clean);
-  return isNaN(num) ? 0 : num;
+  const n = parseFloat(str.replace(/,/g, "").trim());
+  return isNaN(n) ? 0 : n;
 }
 
-// ── Parse date string like "01/01/26" or "01/01/2026" ──
 function parseDate(str) {
   if (!str) return new Date();
-  // Try DD/MM/YY or DD/MM/YYYY
+  // DD/MM/YY or DD/MM/YYYY
   const parts = str.trim().split("/");
   if (parts.length === 3) {
     let [d, m, y] = parts;
     if (y.length === 2) y = "20" + y;
     const dt = new Date(`${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`);
-    if (!isNaN(dt.getTime())) return dt;
+    if (!isNaN(dt)) return dt;
   }
+  // DD MMM YY or DD MMM YYYY
+  const dt2 = new Date(str);
+  if (!isNaN(dt2)) return dt2;
   return new Date();
 }
 
-// ── Clean narration text ───────────────────────────────
-function cleanNarration(text) {
-  return text.replace(/\s+/g, " ").replace(/\n/g, " ").trim();
+function detectType(narration, withdrawalAmt, depositAmt) {
+  if (depositAmt > 0 && withdrawalAmt === 0) return "income";
+  if (withdrawalAmt > 0 && depositAmt === 0) return "expense";
+  const l = (narration || "").toLowerCase();
+  if (
+    l.includes("credited") ||
+    l.includes("salary") ||
+    l.includes("refund") ||
+    l.includes("cashback") ||
+    l.includes("reversal") ||
+    l.includes("received")
+  )
+    return "income";
+  return "expense";
 }
 
-// ── Extract merchant from HDFC narration ──────────────
-// HDFC narration formats:
-// UPI-ZOMATO LIMITED-ZOMATO2.PAYU@INDUS-IN...
-// UPI-SOORYA SANKAR-8807007325@SUPERYES-HD...
-// UPI-MRS ANURADHA PADMANA...
-// HDFC BANK CREDIT CAR.CCBILLPAY@PTYBL...
+function cleanNarration(str) {
+  return (str || "")
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s@.\-\/]/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
 function extractHDFCMerchant(narration) {
-  const n = narration.trim();
-  const lower = n.toLowerCase();
-
-  // Known brands — check first
-  const brands = [
-    ["zomato", "Zomato"],
-    ["swiggy", "Swiggy"],
-    ["amazon", "Amazon"],
-    ["flipkart", "Flipkart"],
-    ["uber", "Uber"],
-    ["ola ", "Ola"],
-    ["rapido", "Rapido"],
-    ["netflix", "Netflix"],
-    ["spotify", "Spotify"],
-    ["hotstar", "Hotstar"],
-    ["paytm", "Paytm"],
-    ["phonepe", "PhonePe"],
-    ["gpay", "Google Pay"],
-    ["airtel", "Airtel"],
-    ["jio", "Jio"],
-    ["irctc", "IRCTC"],
-    ["redbus", "RedBus"],
-    ["bigbasket", "BigBasket"],
-    ["blinkit", "Blinkit"],
-    ["zepto", "Zepto"],
-    ["myntra", "Myntra"],
-    ["nykaa", "Nykaa"],
-    ["zerodha", "Zerodha"],
-    ["groww", "Groww"],
-    ["cred", "CRED"],
-    ["supermon", "Supermarket"],
-    ["perfume", "Perfume Store"],
-    ["toonline", "Airtel Online"],
-  ];
-  for (const [kw, name] of brands) {
-    if (lower.includes(kw)) return name;
-  }
-
-  // UPI pattern: UPI-NAME-vpa@bank or UPI-COMPANY NAME-vpa@...
-  const upiMatch = n.match(/^UPI[-\s]+([A-Z][A-Za-z\s]{2,30}?)[-\s]+[\w.]+@/);
-  if (upiMatch) {
-    const name = upiMatch[1].trim();
-    // Filter out generic names
-    if (!["HDFC", "SBI", "ICICI", "AXIS"].includes(name.toUpperCase())) {
-      return toTitle(name);
-    }
-  }
-
-  // UPI with just name and no VPA visible
-  const upiSimple = n.match(/^UPI[-\s]+([A-Z][A-Za-z\s]{2,25})/);
-  if (upiSimple) return toTitle(upiSimple[1].trim());
-
-  // NEFT/IMPS pattern
-  const neft = n.match(/^(?:NEFT|IMPS|RTGS)[-\s]+\w+[-\s]+(.+?)[-\s]+\d/i);
-  if (neft) return toTitle(neft[1].trim());
-
-  // ATM
-  if (lower.includes("atm")) return "ATM Withdrawal";
-
-  // Credit card bill
-  if (lower.includes("credit") && lower.includes("card"))
-    return "Credit Card Bill";
-
-  // Fallback — first meaningful word group
-  const words = n
-    .split(/[-\s]+/)
-    .filter((w) => w.length > 2 && /[A-Za-z]/.test(w));
-  if (words.length > 0) return toTitle(words.slice(0, 3).join(" "));
-
-  return "Bank Transaction";
+  return (
+    extractMerchant(narration) || narration.split(" ").slice(0, 4).join(" ")
+  );
 }
 
-function toTitle(str) {
-  return str
-    .toLowerCase()
-    .split(" ")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
+// ─────────────────────────────────────────────────────────────
+// HDFC BANK STATEMENT PARSER
+//
+// HDFC PDF text layout (after pdf-parse):
+//   Each row looks like:
+//   "01/01/26 UPI-XXXXXXXXX5307-SBIN0000756-600100565078\n-SENT USING PAYTM U  000800100565078  01/01/26  500.00    260,524.80"
+//
+// Key insight: the LAST number with decimals on a row = closing balance
+//              the SECOND-TO-LAST = transaction amount (withdrawal OR deposit)
+//              We determine debit/credit by looking at whether closing balance
+//              went UP (deposit) or DOWN (withdrawal) from previous row.
+// ─────────────────────────────────────────────────────────────
 
-// ── MAIN PARSER — handles HDFC statement format ────────
 function parseHDFCStatement(text) {
   const transactions = [];
+
+  // Normalize: collapse all whitespace runs to single space, keep newlines
   const lines = text
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // HDFC statement rows look like:
-  // 01/01/26  UPI-XXXXX...  000800...  01/01/26  500.00  (blank)  260524.80
-  // The tricky part: narration spans multiple lines
-  // Strategy: find lines that START with a date pattern DD/MM/YY
+  // Join multi-line narrations — HDFC splits long narrations across lines
+  // A transaction line starts with a date pattern DD/MM/YY or DD/MM/YYYY
+  const DATE_RE = /^\d{2}\/\d{2}\/\d{2,4}/;
 
-  const DATE_REGEX = /^(\d{2}\/\d{2}\/\d{2,4})\s+(.+)/;
-  const AMOUNT_REGEX =
-    /(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)?\s*$/;
+  const rows = [];
+  let currentRow = null;
 
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const dateMatch = line.match(/^(\d{2}\/\d{2}\/\d{2,4})/);
-
-    if (dateMatch) {
-      const date = dateMatch[1];
-      let fullLine = line;
-
-      // Collect continuation lines (lines that don't start with a date)
-      let j = i + 1;
-      while (j < lines.length) {
-        const nextLine = lines[j];
-        // Stop if next line starts with a date
-        if (/^\d{2}\/\d{2}\/\d{2,4}/.test(nextLine)) break;
-        // Stop if it's a footer/header line
-        if (
-          nextLine.includes("HDFC BANK LIMITED") ||
-          nextLine.includes("Page No") ||
-          nextLine.includes("Closing Balance") ||
-          nextLine.includes("From :") ||
-          nextLine.includes("Statement of")
-        )
-          break;
-        fullLine += " " + nextLine;
-        j++;
-      }
-      i = j;
-
-      // Now parse fullLine
-      // Format: DATE  NARRATION  REF_NO  VALUE_DT  WITHDRAWAL  DEPOSIT  CLOSING
-      // We look for amounts at the end
-      const amountPattern =
-        /(\d{1,3}(?:,\d{3})*\.\d{2})\s+(\d{1,3}(?:,\d{3})*\.\d{2})?\s+(\d{1,3}(?:,\d{3})*\.\d{2})/;
-      const amountMatch = fullLine.match(amountPattern);
-
-      if (amountMatch) {
-        // Figure out which amounts are withdrawal, deposit, closing
-        // Find all decimal numbers in the line
-        const allAmounts = [
-          ...fullLine.matchAll(/(\d{1,3}(?:,\d{3})*\.\d{2})/g),
-        ].map((m) => ({
-          value: parseAmount(m[1]),
-          index: m.index,
-        }));
-
-        if (allAmounts.length >= 2) {
-          // Last amount is closing balance
-          // Second to last could be deposit or withdrawal
-          // We need to figure out from context
-
-          // Get the narration part (between date and first ref number)
-          const afterDate = fullLine.slice(date.length).trim();
-
-          // Ref number is typically a long number like 000800...
-          const refMatch = afterDate.match(/\b(\d{12,20})\b/);
-          let narration = afterDate;
-          if (refMatch) {
-            narration = afterDate
-              .slice(0, afterDate.indexOf(refMatch[0]))
-              .trim();
-          }
-
-          // Clean narration
-          narration = cleanNarration(narration);
-          if (!narration || narration.length < 3) {
-            continue;
-          }
-
-          // Determine withdrawal vs deposit
-          // Look for pattern: withdrawal  blank  closing  OR  blank  deposit  closing
-          let withdrawalAmt = 0;
-          let depositAmt = 0;
-          const closingBalance = allAmounts[allAmounts.length - 1].value;
-
-          if (allAmounts.length >= 3) {
-            // Could be: withdrawal  deposit  closing (if both exist)
-            // Or: withdrawal  closing (withdrawal only)
-            // Or: deposit  closing (deposit only)
-            const secondLast = allAmounts[allAmounts.length - 2].value;
-            const thirdLast =
-              allAmounts.length >= 3
-                ? allAmounts[allAmounts.length - 3].value
-                : 0;
-
-            // Check the text between the amounts to determine which is which
-            const lineEnd = fullLine.slice(-100); // last 100 chars
-            const amountPositions = [
-              ...fullLine.matchAll(/(\d{1,3}(?:,\d{3})*\.\d{2})/g),
-            ];
-
-            if (amountPositions.length >= 3) {
-              // 3 amounts at end: withdrawal, deposit, closing
-              // But one of withdrawal or deposit could be blank (no number)
-              // We look for double space gap indicating blank field
-              const lastThree = amountPositions.slice(-3);
-              const gap1 =
-                lastThree[1].index -
-                (lastThree[0].index + lastThree[0][0].length);
-              const gap2 =
-                lastThree[2].index -
-                (lastThree[1].index + lastThree[1][0].length);
-
-              if (gap1 > 5 && gap2 < 15) {
-                // Large gap before second = deposit col is blank = first is withdrawal
-                withdrawalAmt = lastThree[0].value;
-              } else if (gap1 < 15 && gap2 > 5) {
-                // Large gap before third = withdrawal col is blank = second is deposit
-                depositAmt = lastThree[1].value;
-              } else {
-                // Both present
-                withdrawalAmt = lastThree[0].value;
-                depositAmt = lastThree[1].value;
-              }
-            } else if (amountPositions.length === 2) {
-              // Only one transaction amount + closing
-              // Determine by narration
-              const type = detectType(narration, 1, 0);
-              if (type === "income") depositAmt = secondLast;
-              else withdrawalAmt = secondLast;
-            }
-          } else if (allAmounts.length === 2) {
-            const type = detectType(narration, 1, 0);
-            if (type === "income") depositAmt = allAmounts[0].value;
-            else withdrawalAmt = allAmounts[0].value;
-          }
-
-          const amount = withdrawalAmt > 0 ? withdrawalAmt : depositAmt;
-          if (amount <= 0) continue;
-
-          const type = detectType(narration, withdrawalAmt, depositAmt);
-          const merchant = extractHDFCMerchant(narration);
-          const category = categorize(narration);
-
-          transactions.push({
-            date: parseDate(date),
-            narration,
-            merchant,
-            amount,
-            type,
-            category,
-            withdrawalAmt,
-            depositAmt,
-          });
-        }
-      }
-    } else {
-      i++;
+  for (const line of lines) {
+    if (DATE_RE.test(line)) {
+      if (currentRow) rows.push(currentRow);
+      currentRow = line;
+    } else if (currentRow) {
+      // Continuation of previous row (multi-line narration)
+      currentRow += " " + line;
     }
   }
+  if (currentRow) rows.push(currentRow);
 
-  return transactions;
-}
+  let prevClosing = null;
 
-// ── FALLBACK — line-by-line amount extraction ──────────
-// If structured parsing finds nothing, fall back to extracting
-// any line with a clear debit/credit amount
-function parseFallback(text) {
-  const transactions = [];
-  const lines = text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 10);
+  for (const row of rows) {
+    // Extract all decimal amounts from the row — format: 1,234.56 or 123.45
+    const AMOUNT_RE = /\b(\d{1,3}(?:,\d{2,3})*\.\d{2})\b/g;
+    const allAmounts = [...row.matchAll(AMOUNT_RE)].map((m) => ({
+      raw: m[1],
+      value: parseAmount(m[1]),
+      index: m.index,
+    }));
 
-  // Look for lines with date + amount pattern
-  for (const line of lines) {
-    if (!/\d{2}\/\d{2}\/\d{2,4}/.test(line)) continue;
+    // Need at least 2 amounts: one transaction amount + closing balance
+    if (allAmounts.length < 2) continue;
 
-    const amounts = [...line.matchAll(/(\d{1,3}(?:,\d{3})*\.\d{2})/g)];
-    if (amounts.length < 2) continue;
-
-    const dateMatch = line.match(/(\d{2}\/\d{2}\/\d{2,4})/);
+    // Extract date at start
+    const dateMatch = row.match(/^(\d{2}\/\d{2}\/\d{2,4})/);
     if (!dateMatch) continue;
+    const date = parseDate(dateMatch[1]);
 
-    // Take second-to-last amount as transaction amount (last is closing balance)
-    const txnAmount = parseAmount(amounts[amounts.length - 2][1]);
-    if (txnAmount <= 0 || txnAmount > 10000000) continue;
+    // Closing balance = last amount
+    const closingBalance = allAmounts[allAmounts.length - 1].value;
 
-    // Get narration — text between date and first big number
-    const afterDate = line.slice(dateMatch.index + dateMatch[1].length).trim();
-    const firstNumIdx = afterDate.search(/\d{6,}/);
-    const narration =
-      firstNumIdx > 0
-        ? cleanNarration(afterDate.slice(0, firstNumIdx))
-        : cleanNarration(afterDate.slice(0, 60));
+    // Skip if closing balance looks invalid (too small or too large)
+    if (closingBalance < 0 || closingBalance > 99999999) continue;
+
+    // Get the narration — text between date and the first long ref number
+    const afterDate = row.slice(dateMatch[0].length).trim();
+
+    // HDFC ref numbers are typically 12-20 digit pure-number strings
+    // Remove them from narration
+    const REF_RE = /\b\d{10,20}\b/g;
+    let narration = afterDate
+      .replace(REF_RE, " ")
+      .replace(AMOUNT_RE, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Also remove value date (second date in row like "01/01/26")
+    narration = narration.replace(/\b\d{2}\/\d{2}\/\d{2,4}\b/g, "").trim();
+    narration = cleanNarration(narration);
 
     if (!narration || narration.length < 3) continue;
 
+    // Determine transaction amount and type
+    // Strategy: compare closing balance to previous closing balance
+    let withdrawalAmt = 0;
+    let depositAmt = 0;
+    let amount = 0;
+
+    if (allAmounts.length === 2) {
+      // Only one transaction amount before closing balance
+      amount = allAmounts[0].value;
+      if (prevClosing !== null) {
+        if (closingBalance > prevClosing) depositAmt = amount;
+        else withdrawalAmt = amount;
+      } else {
+        // First row — use narration to guess
+        const type = detectType(narration, 1, 0);
+        if (type === "income") depositAmt = amount;
+        else withdrawalAmt = amount;
+      }
+    } else if (allAmounts.length >= 3) {
+      // Could be withdrawal+closing, deposit+closing, or withdrawal+deposit+closing
+      // The transaction amounts are all except the last one
+      const txAmounts = allAmounts.slice(0, -1);
+
+      // Use balance direction to figure out which is debit/credit
+      if (prevClosing !== null) {
+        const balanceDiff = closingBalance - prevClosing;
+        if (balanceDiff > 0) {
+          // Balance went up — deposit
+          // Find the amount closest to balanceDiff
+          depositAmt = txAmounts.reduce((best, a) =>
+            Math.abs(a.value - balanceDiff) < Math.abs(best.value - balanceDiff)
+              ? a
+              : best,
+          ).value;
+        } else {
+          // Balance went down — withdrawal
+          withdrawalAmt = txAmounts.reduce((best, a) =>
+            Math.abs(a.value - Math.abs(balanceDiff)) <
+            Math.abs(best.value - Math.abs(balanceDiff))
+              ? a
+              : best,
+          ).value;
+        }
+      } else {
+        // No previous balance — take second-to-last as transaction amount
+        const txAmt = allAmounts[allAmounts.length - 2].value;
+        const type = detectType(narration, 1, 0);
+        if (type === "income") depositAmt = txAmt;
+        else withdrawalAmt = txAmt;
+      }
+      amount = depositAmt > 0 ? depositAmt : withdrawalAmt;
+    }
+
+    if (amount <= 0 || amount > 10000000) {
+      prevClosing = closingBalance;
+      continue;
+    }
+
+    prevClosing = closingBalance;
+
+    const type = detectType(narration, withdrawalAmt, depositAmt);
+    const merchant = extractHDFCMerchant(narration);
+    const category = categorize(narration);
+
     transactions.push({
-      date: parseDate(dateMatch[1]),
+      date,
       narration,
-      merchant: extractHDFCMerchant(narration),
-      amount: txnAmount,
-      type: detectType(narration, txnAmount, 0),
-      category: categorize(narration),
-      withdrawalAmt: txnAmount,
-      depositAmt: 0,
+      merchant,
+      amount,
+      type,
+      category,
+      withdrawalAmt,
+      depositAmt,
     });
   }
 
   return transactions;
 }
 
-// ── POST /api/pdf/upload ───────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// SBI BANK STATEMENT PARSER
+// Columns: Txn Date | Description | Ref No | Debit | Credit | Balance
+// ─────────────────────────────────────────────────────────────
+
+function parseSBIStatement(text) {
+  const transactions = [];
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const DATE_RE = /^\d{2}\s+\w{3}\s+\d{4}/; // "01 Jan 2026"
+
+  for (const line of lines) {
+    if (!DATE_RE.test(line)) continue;
+    const AMOUNT_RE = /\b(\d{1,3}(?:,\d{2,3})*\.\d{2})\b/g;
+    const amounts = [...line.matchAll(AMOUNT_RE)].map((m) => parseAmount(m[1]));
+    if (amounts.length < 2) continue;
+
+    const dateMatch = line.match(/^(\d{2}\s+\w{3}\s+\d{4})/);
+    const date = dateMatch ? new Date(dateMatch[1]) : new Date();
+    const closing = amounts[amounts.length - 1];
+    const txAmt = amounts[amounts.length - 2];
+
+    if (txAmt <= 0 || txAmt > 10000000) continue;
+
+    const afterDate = line.slice(dateMatch ? dateMatch[0].length : 0);
+    const narration = cleanNarration(
+      afterDate
+        .replace(/\d{1,3}(?:,\d{2,3})*\.\d{2}/g, "")
+        .replace(/\d{6,}/g, ""),
+    );
+    if (!narration || narration.length < 3) continue;
+
+    const type = detectType(narration, txAmt, 0);
+    transactions.push({
+      date,
+      narration,
+      merchant: extractHDFCMerchant(narration),
+      amount: txAmt,
+      type,
+      category: categorize(narration),
+      withdrawalAmt: type === "expense" ? txAmt : 0,
+      depositAmt: type === "income" ? txAmt : 0,
+    });
+  }
+  return transactions;
+}
+
+// ─────────────────────────────────────────────────────────────
+// GENERIC FALLBACK PARSER
+// Works for any statement that has date + description + amount on same line
+// ─────────────────────────────────────────────────────────────
+
+function parseFallback(text) {
+  const transactions = [];
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (!/\d{2}[\/\-]\d{2}[\/\-]\d{2,4}/.test(line)) continue;
+
+    const AMOUNT_RE = /\b(\d{1,3}(?:,\d{2,3})*\.\d{2})\b/g;
+    const amounts = [...line.matchAll(AMOUNT_RE)].map((m) => parseAmount(m[1]));
+    if (amounts.length < 2) continue;
+
+    // Second-to-last = transaction amount, last = balance
+    const txAmt = amounts[amounts.length - 2];
+    if (txAmt <= 0 || txAmt > 10000000) continue;
+
+    const dateMatch = line.match(/(\d{2}[\/\-]\d{2}[\/\-]\d{2,4})/);
+    const date = dateMatch
+      ? parseDate(dateMatch[1].replace(/-/g, "/"))
+      : new Date();
+
+    const narration = cleanNarration(
+      line
+        .replace(/\d{1,3}(?:,\d{2,3})*\.\d{2}/g, "")
+        .replace(/\d{8,}/g, "")
+        .replace(/\d{2}[\/\-]\d{2}[\/\-]\d{2,4}/g, ""),
+    );
+    if (!narration || narration.length < 3) continue;
+
+    const type = detectType(narration, txAmt, 0);
+    transactions.push({
+      date,
+      narration,
+      merchant: extractHDFCMerchant(narration),
+      amount: txAmt,
+      type,
+      category: categorize(narration),
+      withdrawalAmt: type === "expense" ? txAmt : 0,
+      depositAmt: type === "income" ? txAmt : 0,
+    });
+  }
+  return transactions;
+}
+
+// ─────────────────────────────────────────────────────────────
+// DETECT BANK TYPE FROM TEXT
+// ─────────────────────────────────────────────────────────────
+
+function detectBank(text) {
+  const t = text.slice(0, 2000).toUpperCase();
+  if (t.includes("HDFC BANK")) return "HDFC";
+  if (t.includes("STATE BANK OF INDIA") || t.includes("SBI")) return "SBI";
+  if (t.includes("ICICI BANK")) return "ICICI";
+  if (t.includes("AXIS BANK")) return "AXIS";
+  if (t.includes("KOTAK")) return "KOTAK";
+  return "GENERIC";
+}
+
+// ─────────────────────────────────────────────────────────────
+// POST /api/pdf/upload
+// ─────────────────────────────────────────────────────────────
+
 router.post("/upload", auth, upload.single("statement"), async (req, res) => {
   try {
-    if (!req.file) {
+    if (!req.file)
       return res.status(400).json({ error: "No PDF file uploaded" });
-    }
 
-    // Parse PDF
     let pdfData;
     try {
       pdfData = await pdfParse(req.file.buffer);
@@ -391,32 +373,32 @@ router.post("/upload", auth, upload.single("statement"), async (req, res) => {
       });
     }
 
-    // Try structured HDFC parser first
-    let parsed = parseHDFCStatement(text);
+    const bank = detectBank(text);
+    let parsed = [];
 
-    // Fall back to generic parser if needed
-    if (parsed.length === 0) {
-      parsed = parseFallback(text);
+    if (bank === "HDFC") {
+      parsed = parseHDFCStatement(text);
+    } else if (bank === "SBI") {
+      parsed = parseSBIStatement(text);
+    } else {
+      parsed = parseHDFCStatement(text); // Try HDFC format first
+      if (parsed.length === 0) parsed = parseFallback(text);
     }
 
     if (parsed.length === 0) {
       return res.status(400).json({
         error:
-          "No transactions found in PDF. Supported: HDFC, SBI, ICICI, Axis bank statements.",
-        rawTextSample: text.slice(0, 500),
+          "No transactions found. Supported banks: HDFC, SBI, ICICI, Axis. Make sure your PDF is a text-based statement.",
+        rawTextSample: text.slice(0, 800),
       });
     }
 
-    // Insert into DB
-    let inserted = 0;
-    let skipped = 0;
-    const errors = [];
+    let inserted = 0,
+      skipped = 0;
 
     for (const txn of parsed) {
       try {
-        // Create a unique text key from narration + date + amount
-        const textKey = `PDF:${txn.narration.slice(0, 80)}:${txn.amount}:${txn.date.toISOString().slice(0, 10)}`;
-
+        const textKey = `PDF:${txn.narration.slice(0, 80)}:${txn.amount}:${txn.date.toISOString().slice(0, 10)}:${req.userId}`;
         await Transaction.create({
           text: textKey,
           amount: txn.amount,
@@ -429,19 +411,18 @@ router.post("/upload", auth, upload.single("statement"), async (req, res) => {
         });
         inserted++;
       } catch (e) {
-        if (e.code === 11000)
-          skipped++; // duplicate
-        else errors.push(e.message);
+        if (e.code === 11000) skipped++;
       }
     }
 
     res.json({
       success: true,
+      bank,
       parsed: parsed.length,
       inserted,
       skipped,
-      message: `Successfully imported ${inserted} transactions from your bank statement.`,
-      preview: parsed.slice(0, 5).map((t) => ({
+      message: `Imported ${inserted} transactions from your ${bank} statement${skipped > 0 ? ` (${skipped} duplicates skipped)` : ""}.`,
+      preview: parsed.slice(0, 8).map((t) => ({
         date: t.date.toLocaleDateString("en-IN"),
         merchant: t.merchant,
         amount: t.amount,
@@ -455,9 +436,9 @@ router.post("/upload", auth, upload.single("statement"), async (req, res) => {
   }
 });
 
-// ── GET /api/pdf/test ──────────────────────────────────
-router.get("/test", auth, (req, res) => {
-  res.json({ ok: true, message: "PDF upload endpoint is working" });
-});
+// GET /api/pdf/test
+router.get("/test", auth, (req, res) =>
+  res.json({ ok: true, message: "PDF upload endpoint working" }),
+);
 
 module.exports = router;
