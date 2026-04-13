@@ -23,6 +23,7 @@ connectDB();
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/transactions", require("./routes/transactionRoutes"));
 app.use("/api/sms", require("./routes/smsRoutes"));
+app.use("/api/pdf", require("./routes/pdfRoutes"));
 
 app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 app.get("/", (req, res) => res.json({ message: "MoneyMind API running" }));

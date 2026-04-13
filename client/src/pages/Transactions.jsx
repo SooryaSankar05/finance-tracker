@@ -1,3 +1,8 @@
+// FILE: client/src/pages/Transactions.jsx
+// REPLACE your existing Transactions.jsx with this
+// Key change: PDF upload now sends to /api/pdf/upload (server-side parsing)
+// instead of trying to parse in the browser (which was unreliable)
+
 import { useEffect, useState, useRef } from "react";
 import API from "../services/api";
 import { useTheme } from "../context/ThemeContext";
@@ -10,6 +15,7 @@ import {
   FileText,
   X,
   Upload,
+  CheckCircle,
 } from "lucide-react";
 
 const CAT_COLORS = {
@@ -50,18 +56,22 @@ export default function Transactions() {
   const [addMode, setAddMode] = useState(null);
   const fileRef = useRef(null);
 
+  // SMS state
   const [smsText, setSmsText] = useState("");
   const [smsAdding, setSmsAdding] = useState(false);
+
+  // Manual state
   const [mAmt, setMAmt] = useState("");
   const [mCat, setMCat] = useState("Food");
   const [mNote, setMNote] = useState("");
   const [mType, setMType] = useState("expense");
   const [mDate, setMDate] = useState("");
   const [mAdding, setMAdding] = useState(false);
-  const [pdfParsed, setPdfParsed] = useState([]);
+
+  // PDF state
   const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfAdding, setPdfAdding] = useState(false);
-  const [pdfMsg, setPdfMsg] = useState("");
+  const [pdfResult, setPdfResult] = useState(null); // { inserted, skipped, preview }
+  const [pdfError, setPdfError] = useState("");
 
   useEffect(() => {
     fetchData();
@@ -136,75 +146,45 @@ export default function Transactions() {
     }
   };
 
-  const handlePdf = async (e) => {
+  // ── PROPER PDF UPLOAD — sends to server for parsing ──
+  const handlePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Reset state
+    setPdfResult(null);
+    setPdfError("");
     setPdfLoading(true);
-    setPdfParsed([]);
-    setPdfMsg("");
+
     try {
-      const fileUrl = URL.createObjectURL(file);
-      if (!window.pdfjsLib) {
-        await new Promise((res, rej) => {
-          const s = document.createElement("script");
-          s.src =
-            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-          s.onload = res;
-          s.onerror = rej;
-          document.head.appendChild(s);
-        });
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      const formData = new FormData();
+      formData.append("statement", file);
+
+      const token = localStorage.getItem("token");
+      const baseUrl =
+        process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+
+      const response = await fetch(`${baseUrl}/pdf/upload`, {
+        method: "POST",
+        headers: { authorization: token },
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        setPdfError(result.error || "Upload failed");
+        return;
       }
-      const pdf = await window.pdfjsLib.getDocument(fileUrl).promise;
-      let fullText = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        fullText += content.items.map((s) => s.str).join(" ") + "\n";
-      }
-      const lines = fullText
-        .split(/[\n\r]+/)
-        .map((l) => l.trim())
-        .filter((l) => l.length > 5);
-      const txnLines = lines.filter(
-        (l) =>
-          /(?:rs\.?|inr|₹)\s*\d+/i.test(l) ||
-          /\d{1,3}(?:,\d{3})*(?:\.\d{2})?\s*(?:cr|dr)/i.test(l) ||
-          /(?:debited?|credited?|purchase|payment)\b/i.test(l),
-      );
-      if (!txnLines.length)
-        setPdfMsg(
-          "No transaction lines found. Try the SMS paste method instead.",
-        );
-      else {
-        setPdfParsed(txnLines.slice(0, 100));
-        setPdfMsg(`Found ${txnLines.length} transaction lines.`);
-      }
-      URL.revokeObjectURL(fileUrl);
-    } catch (e) {
-      console.error(e);
-      setPdfMsg(
-        "Could not read PDF. Make sure it's text-based, not a scanned image.",
-      );
+
+      setPdfResult(result);
+      fetchData(); // Refresh transaction list
+    } catch (err) {
+      setPdfError("Upload failed: " + err.message);
     } finally {
       setPdfLoading(false);
-    }
-  };
-
-  const importPdf = async () => {
-    if (!pdfParsed.length) return;
-    setPdfAdding(true);
-    try {
-      await API.post("/transactions/bulk", { texts: pdfParsed });
-      setPdfParsed([]);
-      setPdfMsg("");
-      setAddMode(null);
-      fetchData();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setPdfAdding(false);
+      // Reset file input so same file can be uploaded again
+      if (fileRef.current) fileRef.current.value = "";
     }
   };
 
@@ -250,6 +230,7 @@ export default function Transactions() {
 
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Header */}
       <div
         style={{
           display: "flex",
@@ -281,7 +262,11 @@ export default function Transactions() {
           ].map(({ mode, label, Icon }) => (
             <button
               key={mode}
-              onClick={() => setAddMode(addMode === mode ? null : mode)}
+              onClick={() => {
+                setAddMode(addMode === mode ? null : mode);
+                setPdfResult(null);
+                setPdfError("");
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -328,8 +313,8 @@ export default function Transactions() {
               <p
                 style={{ fontSize: "11px", color: t.textSub, marginTop: "2px" }}
               >
-                Works with any Indian bank — HDFC, SBI, ICICI, Axis, Kotak, UPI
-                etc. Separate multiple SMS with a blank line.
+                Any Indian bank — HDFC, SBI, ICICI, Axis, Kotak, UPI. Separate
+                multiple SMS with a blank line.
               </p>
             </div>
             <button
@@ -555,7 +540,7 @@ export default function Transactions() {
         </div>
       )}
 
-      {/* PDF Panel */}
+      {/* PDF Panel — NEW server-side parsing */}
       {addMode === "pdf" && (
         <div
           style={{
@@ -570,7 +555,7 @@ export default function Transactions() {
             style={{
               display: "flex",
               justifyContent: "space-between",
-              marginBottom: "10px",
+              marginBottom: "12px",
             }}
           >
             <div>
@@ -580,14 +565,15 @@ export default function Transactions() {
               <p
                 style={{ fontSize: "11px", color: t.textSub, marginTop: "2px" }}
               >
-                Text-based PDFs only. Password-protected PDFs are not supported.
+                Supports HDFC, SBI, ICICI, Axis statements. Must be text-based
+                PDF (not a scanned image).
               </p>
             </div>
             <button
               onClick={() => {
                 setAddMode(null);
-                setPdfParsed([]);
-                setPdfMsg("");
+                setPdfResult(null);
+                setPdfError("");
               }}
               style={{
                 background: "none",
@@ -599,91 +585,236 @@ export default function Transactions() {
               <X size={15} />
             </button>
           </div>
+
+          {/* Upload button */}
           <input
             ref={fileRef}
             type="file"
             accept=".pdf"
-            onChange={handlePdf}
+            onChange={handlePdfUpload}
             style={{ display: "none" }}
           />
-          <button
-            onClick={() => fileRef.current?.click()}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              border: `2px dashed ${t.border}`,
-              borderRadius: "10px",
-              padding: "18px 20px",
-              background: t.hover,
-              cursor: "pointer",
-              color: t.textMuted,
-              fontSize: "13px",
-              width: "100%",
-              justifyContent: "center",
-              marginBottom: "10px",
-            }}
-          >
-            <Upload size={16} />
-            {pdfLoading ? "Reading PDF..." : "Click to select PDF file"}
-          </button>
-          {pdfMsg && (
-            <p
+
+          {!pdfLoading && !pdfResult && (
+            <button
+              onClick={() => fileRef.current?.click()}
               style={{
-                fontSize: "12px",
-                color: pdfParsed.length > 0 ? t.green : t.red,
-                marginBottom: "8px",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                border: `2px dashed ${t.border}`,
+                borderRadius: "12px",
+                padding: "24px 20px",
+                background: t.hover,
+                cursor: "pointer",
+                color: t.textMuted,
+                fontSize: "14px",
+                fontWeight: "500",
+                width: "100%",
+                justifyContent: "center",
               }}
             >
-              {pdfMsg}
-            </p>
+              <Upload size={20} />
+              Click to select your bank statement PDF
+            </button>
           )}
-          {pdfParsed.length > 0 && (
-            <>
+
+          {/* Loading state */}
+          {pdfLoading && (
+            <div
+              style={{
+                border: `2px dashed ${t.green}`,
+                borderRadius: "12px",
+                padding: "24px 20px",
+                background: t.greenBg,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "12px",
+              }}
+            >
               <div
                 style={{
-                  maxHeight: "150px",
-                  overflowY: "auto",
-                  border: `1px solid ${t.border}`,
-                  borderRadius: "8px",
-                  padding: "8px",
-                  marginBottom: "10px",
-                  background: t.bg,
+                  width: "20px",
+                  height: "20px",
+                  border: `3px solid ${t.border}`,
+                  borderTopColor: t.green,
+                  borderRadius: "50%",
+                  animation: "spin 0.8s linear infinite",
+                }}
+              />
+              <span
+                style={{ color: t.green, fontSize: "14px", fontWeight: "600" }}
+              >
+                Parsing your bank statement...
+              </span>
+              <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            </div>
+          )}
+
+          {/* Error state */}
+          {pdfError && (
+            <div
+              style={{
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                borderRadius: "10px",
+                padding: "14px 16px",
+                marginBottom: "12px",
+              }}
+            >
+              <p
+                style={{
+                  color: "#dc2626",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  marginBottom: "4px",
                 }}
               >
-                {pdfParsed.map((line, i) => (
-                  <p
-                    key={i}
-                    style={{
-                      fontSize: "11px",
-                      color: t.textSub,
-                      marginBottom: "3px",
-                      fontFamily: "monospace",
-                    }}
-                  >
-                    {line}
-                  </p>
-                ))}
-              </div>
+                Upload failed
+              </p>
+              <p style={{ color: "#dc2626", fontSize: "12px" }}>{pdfError}</p>
               <button
-                onClick={importPdf}
-                disabled={pdfAdding}
+                onClick={() => {
+                  setPdfError("");
+                  fileRef.current?.click();
+                }}
                 style={{
-                  background: pdfAdding ? "#86efac" : t.green,
+                  marginTop: "10px",
+                  background: t.green,
                   color: "#fff",
                   border: "none",
+                  padding: "7px 14px",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  cursor: "pointer",
+                }}
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {/* Success state */}
+          {pdfResult && (
+            <div>
+              <div
+                style={{
+                  background: "#f0fdf4",
+                  border: "1px solid #bbf7d0",
+                  borderRadius: "12px",
+                  padding: "16px 18px",
+                  marginBottom: "14px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "10px",
+                  }}
+                >
+                  <CheckCircle size={18} color="#16a34a" />
+                  <p
+                    style={{
+                      color: "#16a34a",
+                      fontSize: "14px",
+                      fontWeight: "700",
+                    }}
+                  >
+                    {pdfResult.message}
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: "20px" }}>
+                  <span style={{ fontSize: "12px", color: "#166534" }}>
+                    ✓ {pdfResult.inserted} added
+                  </span>
+                  <span style={{ fontSize: "12px", color: "#6b7280" }}>
+                    ↷ {pdfResult.skipped} duplicates skipped
+                  </span>
+                  <span style={{ fontSize: "12px", color: "#374151" }}>
+                    📄 {pdfResult.parsed} found in PDF
+                  </span>
+                </div>
+              </div>
+
+              {/* Preview of imported transactions */}
+              {pdfResult.preview?.length > 0 && (
+                <div>
+                  <p
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      color: t.textSub,
+                      marginBottom: "8px",
+                    }}
+                  >
+                    FIRST 5 TRANSACTIONS IMPORTED
+                  </p>
+                  {pdfResult.preview.map((tx, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "8px 12px",
+                        background: t.hover,
+                        borderRadius: "8px",
+                        marginBottom: "6px",
+                        border: `1px solid ${t.border}`,
+                      }}
+                    >
+                      <div>
+                        <p
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: "600",
+                            color: t.text,
+                          }}
+                        >
+                          {tx.merchant}
+                        </p>
+                        <p style={{ fontSize: "11px", color: t.textSub }}>
+                          {tx.category} · {tx.date}
+                        </p>
+                      </div>
+                      <p
+                        style={{
+                          fontWeight: "700",
+                          fontSize: "13px",
+                          color: tx.type === "income" ? t.green : t.red,
+                        }}
+                      >
+                        {tx.type === "income" ? "+" : "-"}
+                        {fmt(tx.amount)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => {
+                  setPdfResult(null);
+                  fileRef.current?.click();
+                }}
+                style={{
+                  marginTop: "10px",
+                  background: t.surface,
+                  border: `1px solid ${t.border}`,
+                  color: t.text,
                   padding: "8px 16px",
                   borderRadius: "9px",
                   fontSize: "13px",
-                  fontWeight: "600",
-                  cursor: pdfAdding ? "not-allowed" : "pointer",
+                  cursor: "pointer",
                 }}
               >
-                {pdfAdding
-                  ? "Importing..."
-                  : `Import ${pdfParsed.length} Transactions`}
+                Upload Another Statement
               </button>
-            </>
+            </div>
           )}
         </div>
       )}
@@ -796,7 +927,7 @@ export default function Transactions() {
         ))}
       </div>
 
-      {/* List */}
+      {/* Transaction list */}
       {loading ? (
         <div style={{ textAlign: "center", padding: "50px", color: t.textSub }}>
           Loading...
@@ -868,7 +999,7 @@ export default function Transactions() {
                       tx.note !== tx.merchant && (
                         <span style={{ fontWeight: "400", color: t.textSub }}>
                           {" "}
-                          — {tx.note}
+                          — {tx.note.slice(0, 40)}
                         </span>
                       )}
                   </p>
