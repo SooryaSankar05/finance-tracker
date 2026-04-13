@@ -1,7 +1,8 @@
 // FILE: client/src/pages/Transactions.jsx
-// REPLACE your existing Transactions.jsx with this
-// Key change: PDF upload now sends to /api/pdf/upload (server-side parsing)
-// instead of trying to parse in the browser (which was unreliable)
+// Changes from original:
+// 1. Added delete button (trash icon) on each transaction row
+// 2. PDF upload shows bank name detected
+// 3. Preview shows up to 8 transactions instead of 5
 
 import { useEffect, useState, useRef } from "react";
 import API from "../services/api";
@@ -16,6 +17,7 @@ import {
   X,
   Upload,
   CheckCircle,
+  Trash2,
 } from "lucide-react";
 
 const CAT_COLORS = {
@@ -56,6 +58,10 @@ export default function Transactions() {
   const [addMode, setAddMode] = useState(null);
   const fileRef = useRef(null);
 
+  // Delete state
+  const [deletingId, setDeletingId] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null); // tx._id to confirm
+
   // SMS state
   const [smsText, setSmsText] = useState("");
   const [smsAdding, setSmsAdding] = useState(false);
@@ -70,7 +76,7 @@ export default function Transactions() {
 
   // PDF state
   const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfResult, setPdfResult] = useState(null); // { inserted, skipped, preview }
+  const [pdfResult, setPdfResult] = useState(null);
   const [pdfError, setPdfError] = useState("");
 
   useEffect(() => {
@@ -98,6 +104,21 @@ export default function Transactions() {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── DELETE TRANSACTION ────────────────────────────────────
+  const deleteTransaction = async (id) => {
+    setDeletingId(id);
+    try {
+      await API.delete(`/transactions/${id}`);
+      setData((prev) => prev.filter((tx) => tx._id !== id));
+      setConfirmDelete(null);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to delete. Please try again.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -146,44 +167,34 @@ export default function Transactions() {
     }
   };
 
-  // ── PROPER PDF UPLOAD — sends to server for parsing ──
   const handlePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // Reset state
     setPdfResult(null);
     setPdfError("");
     setPdfLoading(true);
-
     try {
       const formData = new FormData();
       formData.append("statement", file);
-
       const token = localStorage.getItem("token");
       const baseUrl =
         process.env.REACT_APP_API_URL || "http://localhost:5000/api";
-
       const response = await fetch(`${baseUrl}/pdf/upload`, {
         method: "POST",
         headers: { authorization: token },
         body: formData,
       });
-
       const result = await response.json();
-
       if (!response.ok) {
         setPdfError(result.error || "Upload failed");
         return;
       }
-
       setPdfResult(result);
-      fetchData(); // Refresh transaction list
+      fetchData();
     } catch (err) {
       setPdfError("Upload failed: " + err.message);
     } finally {
       setPdfLoading(false);
-      // Reset file input so same file can be uploaded again
       if (fileRef.current) fileRef.current.value = "";
     }
   };
@@ -230,6 +241,110 @@ export default function Transactions() {
 
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      {/* Confirm delete modal */}
+      {confirmDelete && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            style={{
+              background: t.surface,
+              borderRadius: "16px",
+              padding: "24px 28px",
+              border: `1px solid ${t.border}`,
+              maxWidth: "360px",
+              width: "90%",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                marginBottom: "10px",
+              }}
+            >
+              <div
+                style={{
+                  width: "36px",
+                  height: "36px",
+                  borderRadius: "10px",
+                  background: "#fef2f2",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Trash2 size={18} color="#dc2626" />
+              </div>
+              <p style={{ fontWeight: "700", fontSize: "15px", color: t.text }}>
+                Delete transaction?
+              </p>
+            </div>
+            <p
+              style={{
+                fontSize: "13px",
+                color: t.textSub,
+                marginBottom: "20px",
+              }}
+            >
+              This will permanently remove the transaction. This action cannot
+              be undone.
+            </p>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                onClick={() => setConfirmDelete(null)}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "9px",
+                  fontSize: "13px",
+                  border: `1px solid ${t.border}`,
+                  background: t.surface,
+                  color: t.text,
+                  cursor: "pointer",
+                  fontWeight: "500",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteTransaction(confirmDelete)}
+                disabled={deletingId === confirmDelete}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "9px",
+                  fontSize: "13px",
+                  border: "none",
+                  background:
+                    deletingId === confirmDelete ? "#fca5a5" : "#dc2626",
+                  color: "#fff",
+                  cursor:
+                    deletingId === confirmDelete ? "not-allowed" : "pointer",
+                  fontWeight: "600",
+                }}
+              >
+                {deletingId === confirmDelete ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div
         style={{
@@ -540,7 +655,7 @@ export default function Transactions() {
         </div>
       )}
 
-      {/* PDF Panel — NEW server-side parsing */}
+      {/* PDF Panel */}
       {addMode === "pdf" && (
         <div
           style={{
@@ -565,8 +680,8 @@ export default function Transactions() {
               <p
                 style={{ fontSize: "11px", color: t.textSub, marginTop: "2px" }}
               >
-                Supports HDFC, SBI, ICICI, Axis statements. Must be text-based
-                PDF (not a scanned image).
+                Supports HDFC, SBI, ICICI, Axis. Must be a text-based PDF (not a
+                scanned image).
               </p>
             </div>
             <button
@@ -586,7 +701,6 @@ export default function Transactions() {
             </button>
           </div>
 
-          {/* Upload button */}
           <input
             ref={fileRef}
             type="file"
@@ -619,7 +733,6 @@ export default function Transactions() {
             </button>
           )}
 
-          {/* Loading state */}
           {pdfLoading && (
             <div
               style={{
@@ -652,7 +765,6 @@ export default function Transactions() {
             </div>
           )}
 
-          {/* Error state */}
           {pdfError && (
             <div
               style={{
@@ -696,7 +808,6 @@ export default function Transactions() {
             </div>
           )}
 
-          {/* Success state */}
           {pdfResult && (
             <div>
               <div
@@ -727,7 +838,7 @@ export default function Transactions() {
                     {pdfResult.message}
                   </p>
                 </div>
-                <div style={{ display: "flex", gap: "20px" }}>
+                <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
                   <span style={{ fontSize: "12px", color: "#166534" }}>
                     ✓ {pdfResult.inserted} added
                   </span>
@@ -737,10 +848,20 @@ export default function Transactions() {
                   <span style={{ fontSize: "12px", color: "#374151" }}>
                     📄 {pdfResult.parsed} found in PDF
                   </span>
+                  {pdfResult.bank && (
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        color: "#1d4ed8",
+                        fontWeight: "600",
+                      }}
+                    >
+                      🏦 {pdfResult.bank} Bank
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {/* Preview of imported transactions */}
               {pdfResult.preview?.length > 0 && (
                 <div>
                   <p
@@ -751,7 +872,7 @@ export default function Transactions() {
                       marginBottom: "8px",
                     }}
                   >
-                    FIRST 5 TRANSACTIONS IMPORTED
+                    FIRST {pdfResult.preview.length} TRANSACTIONS IMPORTED
                   </p>
                   {pdfResult.preview.map((tx, i) => (
                     <div
@@ -961,10 +1082,22 @@ export default function Transactions() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
+                transition: "border-color 0.15s",
               }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = t.blue)}
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.borderColor = t.border)
+              }
             >
+              {/* Left: icon + info */}
               <div
-                style={{ display: "flex", alignItems: "center", gap: "11px" }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "11px",
+                  flex: 1,
+                  minWidth: 0,
+                }}
               >
                 <div
                   style={{
@@ -984,13 +1117,16 @@ export default function Transactions() {
                     <ArrowDownCircle size={16} color={t.red} />
                   )}
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <p
                     style={{
                       fontWeight: "600",
                       color: t.text,
                       fontSize: "13px",
                       marginBottom: "2px",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
                     }}
                   >
                     {displayName(tx)}
@@ -1034,16 +1170,64 @@ export default function Transactions() {
                   </div>
                 </div>
               </div>
-              <p
+
+              {/* Right: amount + delete button */}
+              <div
                 style={{
-                  fontWeight: "700",
-                  fontSize: "14px",
-                  color: tx.type === "income" ? t.green : t.red,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  flexShrink: 0,
                 }}
               >
-                {tx.type === "income" ? "+" : "-"}
-                {fmt(tx.amount)}
-              </p>
+                <p
+                  style={{
+                    fontWeight: "700",
+                    fontSize: "14px",
+                    color: tx.type === "income" ? t.green : t.red,
+                  }}
+                >
+                  {tx.type === "income" ? "+" : "-"}
+                  {fmt(tx.amount)}
+                </p>
+
+                {/* DELETE BUTTON */}
+                <button
+                  onClick={() => setConfirmDelete(tx._id)}
+                  title="Delete transaction"
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "7px",
+                    border: `1px solid ${t.border}`,
+                    background: "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                    transition: "all 0.15s",
+                    color: t.textSub,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#fef2f2";
+                    e.currentTarget.style.borderColor = "#fca5a5";
+                    e.currentTarget.querySelector("svg").style.color =
+                      "#dc2626";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderColor = t.border;
+                    e.currentTarget.querySelector("svg").style.color =
+                      t.textSub;
+                  }}
+                >
+                  <Trash2
+                    size={13}
+                    style={{ color: t.textSub, pointerEvents: "none" }}
+                  />
+                </button>
+              </div>
             </div>
           ))}
         </div>
