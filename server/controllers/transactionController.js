@@ -55,7 +55,10 @@ exports.addTransaction = async (req, res) => {
       category = mCat || "Others";
       type = mType || "expense";
       merchant = note || mCat || "Manual";
-      rawText = `Manual:${category}:${amount}:${note || ""}:${Date.now()}`;
+      // ✅ FIX: Use Date.now() + random suffix to guarantee uniqueness for manual entries
+      rawText = `Manual:${category}:${amount}:${note || ""}:${Date.now()}:${Math.random()
+        .toString(36)
+        .slice(2)}`;
     } else {
       if (!text) return res.status(400).json({ error: "Text required" });
       rawText = text;
@@ -129,6 +132,20 @@ exports.getTransactions = async (req, res) => {
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+};
+
+// ✅ NEW: DELETE TRANSACTION
+exports.deleteTransaction = async (req, res) => {
+  try {
+    const tx = await Transaction.findOneAndDelete({
+      _id: req.params.id,
+      user: req.userId,
+    });
+    if (!tx) return res.status(404).json({ error: "Transaction not found" });
+    res.json({ message: "Deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -354,7 +371,9 @@ exports.getAIContext = async (req, res) => {
 
     const monthly = {};
     transactions.forEach((t) => {
-      const key = `${new Date(t.date).getFullYear()}-${new Date(t.date).getMonth() + 1}`;
+      const key = `${new Date(t.date).getFullYear()}-${
+        new Date(t.date).getMonth() + 1
+      }`;
       if (!monthly[key]) monthly[key] = { income: 0, expense: 0 };
       monthly[key][t.type] += t.amount;
     });

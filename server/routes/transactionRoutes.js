@@ -16,6 +16,7 @@ router.post("/bulk", auth, tc.bulkAddTransactions);
 router.get("/ai-context", auth, tc.getAIContext);
 router.get("/budgets", auth, tc.getBudgets);
 router.post("/budgets", auth, tc.setBudget);
+router.delete("/:id", auth, tc.deleteTransaction);
 
 router.get("/goals", auth, gc.getGoals);
 router.post("/goals", auth, gc.createGoal);
@@ -28,8 +29,6 @@ router.put("/splits/:id", auth, gc.updateSplit);
 router.delete("/splits/:id", auth, gc.deleteSplit);
 
 // ── AI CHAT ───────────────────────────────────────────────────────────────────
-// Uses gemini-2.5-flash (current free model as of 2026)
-// If that fails, automatically falls back to gemini-1.5-flash
 router.post("/chat", auth, async (req, res) => {
   try {
     const { messages, systemPrompt } = req.body;
@@ -38,23 +37,50 @@ router.post("/chat", auth, async (req, res) => {
     if (!apiKey) {
       return res.status(500).json({
         error:
-          "GEMINI_API_KEY not set. Get your free key at https://aistudio.google.com/app/apikey then add it to server/.env",
+          "GEMINI_API_KEY not configured on server. Add it to your Render environment variables.",
       });
     }
 
-    const contents = messages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: "messages array is required" });
+    }
+
+    // ✅ Convert to Gemini format (assistant → model)
+    const contents = messages
+      .filter((m) => m.role && m.content)
+      .map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: String(m.content) }],
+      }));
+
+    // Gemini requires conversation to start with "user" role
+    // If first message is from model, prepend a dummy user message
+    if (contents.length > 0 && contents[0].role === "model") {
+      contents.unshift({ role: "user", parts: [{ text: "Hello" }] });
+    }
 
     const body = JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
+      system_instruction: {
+        parts: [
+          {
+            text:
+              systemPrompt || "You are MoneyMind, a helpful finance assistant.",
+          },
+        ],
+      },
       contents,
-      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+      generationConfig: {
+        maxOutputTokens: 1024,
+        temperature: 0.7,
+      },
     });
 
-    // Try models in order until one works
-    const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+    // Try Gemini models in order
+    const MODELS = [
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
+    ];
 
     let lastError = null;
 
@@ -72,29 +98,39 @@ router.post("/chat", auth, async (req, res) => {
         const data = await response.json();
 
         if (!response.ok || data.error) {
-          console.warn(`Model ${model} failed:`, data.error?.message);
-          lastError = data.error?.message || `${model} failed`;
-          continue; // try next model
-        }
-
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) {
-          lastError = "Empty response from Gemini";
+          const errMsg =
+            data.error?.message || `${model} returned ${response.status}`;
+          console.warn(`Model ${model} failed: ${errMsg}`);
+          lastError = errMsg;
           continue;
         }
 
-        console.log(`AI responded using model: ${model}`);
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (!text) {
+          // Check for safety block
+          const finishReason = data.candidates?.[0]?.finishReason;
+          lastError = finishReason
+            ? `Response blocked: ${finishReason}`
+            : "Empty response from Gemini";
+          console.warn(`Model ${model}: ${lastError}`);
+          continue;
+        }
+
+        console.log(`✅ AI responded using: ${model}`);
+        // ✅ Consistent response format: { content: [{ type: "text", text }] }
         return res.json({ content: [{ type: "text", text }] });
       } catch (fetchErr) {
-        console.warn(`Fetch error for model ${model}:`, fetchErr.message);
+        console.warn(`Fetch error for ${model}:`, fetchErr.message);
         lastError = fetchErr.message;
         continue;
       }
     }
 
     // All models failed
+    console.error("All Gemini models failed. Last error:", lastError);
     return res.status(500).json({
-      error: `All Gemini models failed. Last error: ${lastError}. Check your API key at aistudio.google.com`,
+      error: `AI service unavailable. Last error: ${lastError}. Please try again in a moment.`,
     });
   } catch (err) {
     console.error("Chat route error:", err.message);
