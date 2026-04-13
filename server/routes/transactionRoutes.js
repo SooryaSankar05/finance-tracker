@@ -45,18 +45,20 @@ router.post("/chat", auth, async (req, res) => {
       return res.status(400).json({ error: "messages array is required" });
     }
 
-    // ✅ Convert to Gemini format (assistant → model)
-    const contents = messages
+    // Convert to Gemini format (assistant -> model)
+    let contents = messages
       .filter((m) => m.role && m.content)
       .map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: String(m.content) }],
       }));
 
-    // Gemini requires conversation to start with "user" role
-    // If first message is from model, prepend a dummy user message
-    if (contents.length > 0 && contents[0].role === "model") {
-      contents.unshift({ role: "user", parts: [{ text: "Hello" }] });
+    // Gemini requires conversation to start with "user" role — drop any leading model messages
+    while (contents.length > 0 && contents[0].role === "model") {
+      contents = contents.slice(1);
+    }
+    if (contents.length === 0) {
+      contents = [{ role: "user", parts: [{ text: "Hello" }] }];
     }
 
     const body = JSON.stringify({
@@ -64,7 +66,8 @@ router.post("/chat", auth, async (req, res) => {
         parts: [
           {
             text:
-              systemPrompt || "You are MoneyMind, a helpful finance assistant.",
+              systemPrompt ||
+              "You are MoneyMind, a helpful personal finance assistant.",
           },
         ],
       },
@@ -75,17 +78,19 @@ router.post("/chat", auth, async (req, res) => {
       },
     });
 
-    // Try Gemini models in order
+    // ✅ FIXED MODEL LIST — only models confirmed to work on v1beta
+    // Removed: gemini-1.5-flash-8b (not on v1beta), gemini-2.5-flash (preview, unstable)
     const MODELS = [
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
-      "gemini-1.5-flash-8b",
+      "gemini-2.0-flash", // best free tier — fast and reliable
+      "gemini-1.5-flash", // proven fallback
+      "gemini-2.0-flash-lite", // lightweight last resort
     ];
 
     let lastError = null;
 
     for (const model of MODELS) {
       try {
+        console.log(`Trying Gemini model: ${model}`);
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
           {
@@ -99,7 +104,7 @@ router.post("/chat", auth, async (req, res) => {
 
         if (!response.ok || data.error) {
           const errMsg =
-            data.error?.message || `${model} returned ${response.status}`;
+            data.error?.message || `${model} returned HTTP ${response.status}`;
           console.warn(`Model ${model} failed: ${errMsg}`);
           lastError = errMsg;
           continue;
@@ -108,17 +113,15 @@ router.post("/chat", auth, async (req, res) => {
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!text) {
-          // Check for safety block
           const finishReason = data.candidates?.[0]?.finishReason;
           lastError = finishReason
-            ? `Response blocked: ${finishReason}`
+            ? `Response blocked (${finishReason})`
             : "Empty response from Gemini";
           console.warn(`Model ${model}: ${lastError}`);
           continue;
         }
 
-        console.log(`✅ AI responded using: ${model}`);
-        // ✅ Consistent response format: { content: [{ type: "text", text }] }
+        console.log(`✅ AI responded using model: ${model}`);
         return res.json({ content: [{ type: "text", text }] });
       } catch (fetchErr) {
         console.warn(`Fetch error for ${model}:`, fetchErr.message);
@@ -127,10 +130,9 @@ router.post("/chat", auth, async (req, res) => {
       }
     }
 
-    // All models failed
     console.error("All Gemini models failed. Last error:", lastError);
     return res.status(500).json({
-      error: `AI service unavailable. Last error: ${lastError}. Please try again in a moment.`,
+      error: `AI unavailable right now. Please try again in a moment.`,
     });
   } catch (err) {
     console.error("Chat route error:", err.message);
