@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"require\\('./server/routes/pdfRoutes.js'\\); console.log\\('pdfRoutes OK'\\)\")",
+      "Bash(node *)",
+      "Bash(bash *)"
+    ]
+  }
+}

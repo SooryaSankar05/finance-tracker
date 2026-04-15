@@ -58,6 +58,24 @@ const SHADES = [
   "#86efac",
   "#bbf7d0",
 ];
+// Category-specific colours used in pie/bar charts and budget bars
+const CAT_COLORS = {
+  Food: "#16a34a",
+  Travel: "#7c3aed",
+  Shopping: "#db2777",
+  Bills: "#2563eb",
+  Entertainment: "#0891b2",
+  Healthcare: "#dc2626",
+  Education: "#d97706",
+  Savings: "#065f46",
+  Transfer: "#4f46e5",
+  Others: "#6b7280",
+  Income: "#15803d",
+};
+const ALL_CATS = [
+  "Food", "Travel", "Shopping", "Bills", "Entertainment",
+  "Healthcare", "Education", "Savings", "Transfer", "Others",
+];
 const fmt = (n) => `₹${(n || 0).toLocaleString("en-IN")}`;
 
 function Tip({ active, payload, label, t }) {
@@ -136,6 +154,8 @@ export default function Dashboard() {
   const [budgets, setBudgets] = useState({});
   const [editBudget, setEditBudget] = useState(null);
   const [budgetVal, setBudgetVal] = useState("");
+  const [newBudgetCat, setNewBudgetCat] = useState("");
+  const [newBudgetVal, setNewBudgetVal] = useState("");
 
   const DEFAULTS = {
     Food: 4000,
@@ -593,15 +613,23 @@ export default function Dashboard() {
                   nameKey="_id"
                   cx="50%"
                   cy="50%"
-                  outerRadius={75}
-                  innerRadius={40}
+                  outerRadius={80}
+                  innerRadius={44}
+                  paddingAngle={2}
                 >
-                  {catData.map((_, i) => (
-                    <Cell key={i} fill={SHADES[i % SHADES.length]} />
+                  {catData.map((entry, i) => (
+                    <Cell
+                      key={i}
+                      fill={CAT_COLORS[entry._id] || SHADES[i % SHADES.length]}
+                    />
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(v) => fmt(v)}
+                  formatter={(v, name, props) => {
+                    const total = catData.reduce((s, d) => s + d.total, 0);
+                    const pct = total > 0 ? ((v / total) * 100).toFixed(1) : 0;
+                    return [`${fmt(v)} (${pct}%)`, name];
+                  }}
                   contentStyle={{
                     background: t.surface,
                     border: `1px solid ${t.border}`,
@@ -611,8 +639,10 @@ export default function Dashboard() {
                 />
                 <Legend
                   iconType="circle"
-                  iconSize={7}
-                  wrapperStyle={{ fontSize: "11px", color: t.textSub }}
+                  iconSize={8}
+                  formatter={(value) => (
+                    <span style={{ fontSize: "11px", color: t.textSub }}>{value}</span>
+                  )}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -741,8 +771,11 @@ export default function Dashboard() {
                 />
                 <Tooltip content={<Tip t={t} />} />
                 <Bar dataKey="total" radius={[0, 4, 4, 0]} name="Spent">
-                  {catData.slice(0, 5).map((_, i) => (
-                    <Cell key={i} fill={SHADES[i % SHADES.length]} />
+                  {catData.slice(0, 5).map((entry, i) => (
+                    <Cell
+                      key={i}
+                      fill={CAT_COLORS[entry._id] || SHADES[i % SHADES.length]}
+                    />
                   ))}
                 </Bar>
               </BarChart>
@@ -764,8 +797,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Budget progress */}
-      {catData.filter((c) => budgets[c._id]).length > 0 && (
+      {/* Budget progress — always visible so users can add their first budget */}
+      {(Object.keys(budgets).length > 0 || true) && (
         <div
           style={{
             background: t.surface,
@@ -775,150 +808,295 @@ export default function Dashboard() {
             marginBottom: "14px",
           }}
         >
+          {/* Section header with over-budget badge */}
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
-              marginBottom: "14px",
+              alignItems: "center",
+              marginBottom: "16px",
             }}
           >
-            <p style={{ fontSize: "13px", fontWeight: "700", color: t.text }}>
-              Budget Progress
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <p style={{ fontSize: "13px", fontWeight: "700", color: t.text }}>
+                Budget Progress
+              </p>
+              {alerts.length > 0 && (
+                <span
+                  style={{
+                    background: "#dc2626",
+                    color: "#fff",
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    padding: "2px 8px",
+                    borderRadius: "99px",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  {alerts.length} over limit
+                </span>
+              )}
+            </div>
             <p style={{ fontSize: "11px", color: t.textSub }}>
-              Click limit to edit · current month only
+              Click limit to edit · current month
             </p>
           </div>
-          {catData
-            .filter((c) => budgets[c._id])
-            .map((cat) => {
-              const limit = budgets[cat._id] || 0;
-              const pct =
-                limit > 0 ? Math.min((cat.total / limit) * 100, 100) : 0;
-              const over = cat.total > limit;
-              return (
-                <div key={cat._id} style={{ marginBottom: "14px" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      marginBottom: "5px",
-                    }}
-                  >
+
+          {/* One row per budgeted category (spending may be 0 this period) */}
+          {Object.keys(budgets).map((cat) => {
+            const limit = budgets[cat] || 0;
+            const spent = catData.find((c) => c._id === cat)?.total || 0;
+            const pct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0;
+            const over = spent > limit;
+            const barColor = over
+              ? t.red
+              : pct > 80
+                ? "#f59e0b"
+                : CAT_COLORS[cat] || t.green;
+
+            return (
+              <div key={cat} style={{ marginBottom: "14px" }}>
+                {/* Row header */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "5px",
+                  }}
+                >
+                  {/* Left: colour dot + name + over-budget badge */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
                     <span
                       style={{
-                        fontSize: "13px",
-                        fontWeight: "600",
-                        color: t.text,
-                      }}
-                    >
-                      {cat._id}
-                    </span>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: "12px",
-                          color: over ? t.red : t.textSub,
-                        }}
-                      >
-                        {fmt(cat.total)}
-                      </span>
-                      <span style={{ fontSize: "12px", color: t.textSub }}>
-                        /
-                      </span>
-                      {editBudget === cat._id ? (
-                        <div style={{ display: "flex", gap: "4px" }}>
-                          <input
-                            autoFocus
-                            value={budgetVal}
-                            onChange={(e) => setBudgetVal(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") saveBudget(cat._id);
-                              if (e.key === "Escape") setEditBudget(null);
-                            }}
-                            style={{
-                              width: "70px",
-                              padding: "2px 6px",
-                              fontSize: "12px",
-                              border: `1px solid ${t.green}`,
-                              borderRadius: "6px",
-                              background: t.inputBg,
-                              color: t.text,
-                              outline: "none",
-                            }}
-                          />
-                          <button
-                            onClick={() => saveBudget(cat._id)}
-                            style={{
-                              fontSize: "11px",
-                              background: t.green,
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "5px",
-                              padding: "2px 7px",
-                              cursor: "pointer",
-                            }}
-                          >
-                            ✓
-                          </button>
-                        </div>
-                      ) : (
-                        <span
-                          onClick={() => {
-                            setEditBudget(cat._id);
-                            setBudgetVal(String(limit));
-                          }}
-                          style={{
-                            fontSize: "12px",
-                            color: t.green,
-                            cursor: "pointer",
-                            fontWeight: "600",
-                          }}
-                        >
-                          {fmt(limit)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      background: t.border,
-                      borderRadius: "99px",
-                      height: "5px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: "5px",
-                        borderRadius: "99px",
-                        background: over
-                          ? t.red
-                          : pct > 80
-                            ? "#f59e0b"
-                            : t.green,
-                        width: `${pct}%`,
-                        transition: "width 0.5s",
+                        width: "9px",
+                        height: "9px",
+                        borderRadius: "50%",
+                        background: CAT_COLORS[cat] || "#6b7280",
+                        flexShrink: 0,
+                        display: "inline-block",
                       }}
                     />
+                    <span
+                      style={{ fontSize: "13px", fontWeight: "600", color: t.text }}
+                    >
+                      {cat}
+                    </span>
+                    {over && (
+                      <span
+                        style={{
+                          background: "#fef2f2",
+                          border: "1px solid #fca5a5",
+                          color: "#dc2626",
+                          fontSize: "10px",
+                          fontWeight: "700",
+                          padding: "1px 7px",
+                          borderRadius: "99px",
+                        }}
+                      >
+                        ⚠ OVER
+                      </span>
+                    )}
                   </div>
-                  <p
+
+                  {/* Right: spent / editable limit */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        color: over ? t.red : t.textSub,
+                        fontWeight: over ? "700" : "400",
+                      }}
+                    >
+                      {fmt(spent)}
+                    </span>
+                    <span style={{ fontSize: "12px", color: t.textSub }}>/</span>
+                    {editBudget === cat ? (
+                      <div style={{ display: "flex", gap: "4px" }}>
+                        <input
+                          autoFocus
+                          value={budgetVal}
+                          onChange={(e) => setBudgetVal(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveBudget(cat);
+                            if (e.key === "Escape") setEditBudget(null);
+                          }}
+                          style={{
+                            width: "72px",
+                            padding: "2px 6px",
+                            fontSize: "12px",
+                            border: `1px solid ${t.green}`,
+                            borderRadius: "6px",
+                            background: t.inputBg,
+                            color: t.text,
+                            outline: "none",
+                          }}
+                        />
+                        <button
+                          onClick={() => saveBudget(cat)}
+                          style={{
+                            fontSize: "11px",
+                            background: t.green,
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "5px",
+                            padding: "2px 7px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    ) : (
+                      <span
+                        onClick={() => {
+                          setEditBudget(cat);
+                          setBudgetVal(String(limit));
+                        }}
+                        title="Click to edit limit"
+                        style={{
+                          fontSize: "12px",
+                          color: t.green,
+                          cursor: "pointer",
+                          fontWeight: "600",
+                        }}
+                      >
+                        {fmt(limit)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div
+                  style={{ background: t.border, borderRadius: "99px", height: "6px" }}
+                >
+                  <div
                     style={{
-                      fontSize: "11px",
-                      color: t.textSub,
-                      marginTop: "3px",
+                      height: "6px",
+                      borderRadius: "99px",
+                      background: barColor,
+                      width: `${pct}%`,
+                      transition: "width 0.5s",
+                    }}
+                  />
+                </div>
+
+                {/* Sub-label */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginTop: "3px",
+                  }}
+                >
+                  <p style={{ fontSize: "11px", color: t.textSub }}>
+                    {pct.toFixed(0)}% used
+                  </p>
+                  {over && (
+                    <p style={{ fontSize: "11px", color: "#dc2626", fontWeight: "600" }}>
+                      Over by {fmt(spent - limit)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Add budget for a category that doesn't have one yet */}
+          {ALL_CATS.filter((c) => !budgets[c]).length > 0 && (
+            <div
+              style={{
+                borderTop: `1px dashed ${t.border}`,
+                paddingTop: "12px",
+                marginTop: "4px",
+                display: "flex",
+                gap: "8px",
+                alignItems: "center",
+              }}
+            >
+              <select
+                value={newBudgetCat}
+                onChange={(e) => setNewBudgetCat(e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: "6px 8px",
+                  border: `1.5px solid ${t.border}`,
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  background: t.inputBg,
+                  color: newBudgetCat ? t.text : t.textSub,
+                  outline: "none",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">+ Set budget for a category…</option>
+                {ALL_CATS.filter((c) => !budgets[c]).map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              {newBudgetCat && (
+                <>
+                  <input
+                    type="number"
+                    placeholder="Limit ₹"
+                    value={newBudgetVal}
+                    onChange={(e) => setNewBudgetVal(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key !== "Enter") return;
+                      const v = parseFloat(newBudgetVal);
+                      if (!v || v <= 0 || !newBudgetCat) return;
+                      await API.post("/transactions/budgets", {
+                        category: newBudgetCat,
+                        limit: v,
+                      });
+                      setBudgets((prev) => ({ ...prev, [newBudgetCat]: v }));
+                      setNewBudgetCat("");
+                      setNewBudgetVal("");
+                    }}
+                    style={{
+                      width: "90px",
+                      padding: "6px 8px",
+                      border: `1.5px solid ${t.border}`,
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      background: t.inputBg,
+                      color: t.text,
+                      outline: "none",
+                    }}
+                  />
+                  <button
+                    onClick={async () => {
+                      const v = parseFloat(newBudgetVal);
+                      if (!v || v <= 0 || !newBudgetCat) return;
+                      await API.post("/transactions/budgets", {
+                        category: newBudgetCat,
+                        limit: v,
+                      });
+                      setBudgets((prev) => ({ ...prev, [newBudgetCat]: v }));
+                      setNewBudgetCat("");
+                      setNewBudgetVal("");
+                    }}
+                    style={{
+                      padding: "6px 14px",
+                      background: t.green,
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontSize: "12px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    {pct.toFixed(0)}% used{over ? " — OVER BUDGET" : ""}
-                  </p>
-                </div>
-              );
-            })}
+                    Set
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

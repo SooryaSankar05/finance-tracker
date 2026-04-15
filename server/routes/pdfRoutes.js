@@ -9,6 +9,7 @@ const auth = require("../middleware/auth");
 const Transaction = require("../models/Transaction");
 const categorize = require("../utils/categorize");
 const extractMerchant = require("../utils/extractMerchant");
+const { parseBankStatementPDF } = require("../utils/parser");
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -385,11 +386,29 @@ router.post("/upload", auth, upload.single("statement"), async (req, res) => {
       if (parsed.length === 0) parsed = parseFallback(text);
     }
 
+    // Tertiary fallback: use the multi-strategy generic parser
     if (parsed.length === 0) {
-      return res.status(400).json({
+      try {
+        const generic = await parseBankStatementPDF(req.file.buffer);
+        parsed = generic.transactions.map((t) => ({
+          date: new Date(t.date),
+          narration: t.merchant,
+          merchant: t.merchant,
+          amount: Math.abs(t.amount),
+          type: t.amount >= 0 ? "income" : "expense",
+          category: categorize(t.merchant),
+          withdrawalAmt: t.amount < 0 ? Math.abs(t.amount) : 0,
+          depositAmt: t.amount >= 0 ? t.amount : 0,
+        }));
+      } catch (e) {
+        console.error("Generic parser error:", e.message);
+      }
+    }
+
+    if (parsed.length === 0) {
+      return res.status(422).json({
         error:
-          "No transactions found. Supported banks: HDFC, SBI, ICICI, Axis. Make sure your PDF is a text-based statement.",
-        rawTextSample: text.slice(0, 800),
+          "This PDF appears to be scanned/image-based and cannot be parsed. Please upload a text-based bank statement.",
       });
     }
 
@@ -398,11 +417,22 @@ router.post("/upload", auth, upload.single("statement"), async (req, res) => {
 
     for (const txn of parsed) {
       try {
+        // Re-run categorisation using both narration and merchant so whichever
+        // has the richer keyword wins (prefer the more specific result).
+        const catFromNarration = categorize(txn.narration || "");
+        const catFromMerchant = categorize(txn.merchant || "");
+        const category =
+          catFromMerchant !== "Others"
+            ? catFromMerchant
+            : catFromNarration !== "Others"
+              ? catFromNarration
+              : "Others";
+
         const textKey = `PDF:${txn.narration.slice(0, 80)}:${txn.amount}:${txn.date.toISOString().slice(0, 10)}:${req.userId}`;
         await Transaction.create({
           text: textKey,
           amount: txn.amount,
-          category: txn.category,
+          category,
           type: txn.type,
           merchant: txn.merchant,
           note: txn.narration.slice(0, 100),
@@ -422,13 +452,19 @@ router.post("/upload", auth, upload.single("statement"), async (req, res) => {
       inserted,
       skipped,
       message: `Imported ${inserted} transactions from your ${bank} statement${skipped > 0 ? ` (${skipped} duplicates skipped)` : ""}.`,
-      preview: parsed.slice(0, 8).map((t) => ({
-        date: t.date.toLocaleDateString("en-IN"),
-        merchant: t.merchant,
-        amount: t.amount,
-        type: t.type,
-        category: t.category,
-      })),
+      preview: parsed.slice(0, 8).map((t) => {
+        const cat =
+          categorize(t.merchant || "") !== "Others"
+            ? categorize(t.merchant || "")
+            : categorize(t.narration || "");
+        return {
+          date: t.date.toLocaleDateString("en-IN"),
+          merchant: t.merchant,
+          amount: t.amount,
+          type: t.type,
+          category: cat,
+        };
+      }),
     });
   } catch (err) {
     console.error("PDF upload error:", err);

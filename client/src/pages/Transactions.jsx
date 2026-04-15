@@ -18,6 +18,9 @@ import {
   Upload,
   CheckCircle,
   Trash2,
+  LayoutList,
+  Table2,
+  Download,
 } from "lucide-react";
 
 const CAT_COLORS = {
@@ -78,6 +81,10 @@ export default function Transactions() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfResult, setPdfResult] = useState(null);
   const [pdfError, setPdfError] = useState("");
+  const [pdfErrorType, setPdfErrorType] = useState("generic"); // "generic" | "scanned"
+
+  // View mode: "cards" | "table"
+  const [viewMode, setViewMode] = useState("cards");
 
   useEffect(() => {
     fetchData();
@@ -172,6 +179,7 @@ export default function Transactions() {
     if (!file) return;
     setPdfResult(null);
     setPdfError("");
+    setPdfErrorType("generic");
     setPdfLoading(true);
     try {
       const formData = new FormData();
@@ -187,6 +195,7 @@ export default function Transactions() {
       const result = await response.json();
       if (!response.ok) {
         setPdfError(result.error || "Upload failed");
+        setPdfErrorType(response.status === 422 ? "scanned" : "generic");
         return;
       }
       setPdfResult(result);
@@ -215,6 +224,31 @@ export default function Transactions() {
   const totalExpense = data
     .filter((tx) => tx.type === "expense")
     .reduce((a, b) => a + b.amount, 0);
+
+  const exportCSV = () => {
+    if (filtered.length === 0) return;
+    const escape = (s) => `"${String(s || "").replace(/"/g, '""')}"`;
+    const headers = ["Date", "Merchant", "Note", "Category", "Type", "Amount (₹)"];
+    const rows = filtered.map((tx) => [
+      tx.date ? new Date(tx.date).toLocaleDateString("en-IN") : "",
+      escape(tx.merchant || ""),
+      escape(tx.note || ""),
+      escape(tx.category || ""),
+      tx.type || "",
+      tx.amount ?? 0,
+    ]);
+    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const today = new Date().toISOString().slice(0, 10);
+    const label =
+      typeFilter !== "all" ? `_${typeFilter}` : "";
+    a.download = `transactions${label}_${today}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const inp = (placeholder, val, setVal, type = "text") => (
     <input
@@ -381,6 +415,7 @@ export default function Transactions() {
                 setAddMode(addMode === mode ? null : mode);
                 setPdfResult(null);
                 setPdfError("");
+                setPdfErrorType("generic");
               }}
               style={{
                 display: "flex",
@@ -400,6 +435,34 @@ export default function Transactions() {
               {label}
             </button>
           ))}
+
+          {/* Export CSV */}
+          <button
+            onClick={exportCSV}
+            disabled={filtered.length === 0}
+            title={
+              filtered.length === 0
+                ? "No transactions to export"
+                : `Export ${filtered.length} transactions as CSV`
+            }
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "5px",
+              background: t.surface,
+              color: filtered.length === 0 ? t.textSub : t.textMuted,
+              border: `1.5px solid ${t.border}`,
+              padding: "7px 13px",
+              borderRadius: "9px",
+              fontSize: "12px",
+              fontWeight: "600",
+              cursor: filtered.length === 0 ? "not-allowed" : "pointer",
+              opacity: filtered.length === 0 ? 0.5 : 1,
+            }}
+          >
+            <Download size={13} />
+            Export CSV
+          </button>
         </div>
       </div>
 
@@ -689,6 +752,7 @@ export default function Transactions() {
                 setAddMode(null);
                 setPdfResult(null);
                 setPdfError("");
+                setPdfErrorType("generic");
               }}
               style={{
                 background: "none",
@@ -768,32 +832,56 @@ export default function Transactions() {
           {pdfError && (
             <div
               style={{
-                background: "#fef2f2",
-                border: "1px solid #fecaca",
-                borderRadius: "10px",
-                padding: "14px 16px",
+                background: pdfErrorType === "scanned" ? "#fffbeb" : "#fef2f2",
+                border: `1.5px solid ${pdfErrorType === "scanned" ? "#fcd34d" : "#fca5a5"}`,
+                borderRadius: "12px",
+                padding: "16px 18px",
                 marginBottom: "12px",
               }}
             >
-              <p
-                style={{
-                  color: "#dc2626",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  marginBottom: "4px",
-                }}
-              >
-                Upload failed
-              </p>
-              <p style={{ color: "#dc2626", fontSize: "12px" }}>{pdfError}</p>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                <span style={{ fontSize: "20px", lineHeight: 1, flexShrink: 0 }}>
+                  {pdfErrorType === "scanned" ? "🖼️" : "⚠️"}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <p
+                    style={{
+                      color: pdfErrorType === "scanned" ? "#92400e" : "#dc2626",
+                      fontSize: "13px",
+                      fontWeight: "700",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    {pdfErrorType === "scanned"
+                      ? "Scanned / image-based PDF detected"
+                      : "Upload failed"}
+                  </p>
+                  <p
+                    style={{
+                      color: pdfErrorType === "scanned" ? "#78350f" : "#b91c1c",
+                      fontSize: "12px",
+                      lineHeight: "1.5",
+                    }}
+                  >
+                    {pdfError}
+                  </p>
+                  {pdfErrorType === "scanned" && (
+                    <p style={{ fontSize: "11px", color: "#92400e", marginTop: "6px" }}>
+                      Tip: Download the statement directly from your bank's internet banking
+                      portal — those PDFs are text-based and will parse correctly.
+                    </p>
+                  )}
+                </div>
+              </div>
               <button
                 onClick={() => {
                   setPdfError("");
+                  setPdfErrorType("generic");
                   fileRef.current?.click();
                 }}
                 style={{
-                  marginTop: "10px",
-                  background: t.green,
+                  marginTop: "12px",
+                  background: pdfErrorType === "scanned" ? "#d97706" : "#dc2626",
                   color: "#fff",
                   border: "none",
                   padding: "7px 14px",
@@ -803,7 +891,7 @@ export default function Transactions() {
                   cursor: "pointer",
                 }}
               >
-                Try Again
+                Try a Different File
               </button>
             </div>
           )}
@@ -1046,6 +1134,36 @@ export default function Transactions() {
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
+        <div
+          style={{
+            display: "flex",
+            border: `1.5px solid ${t.border}`,
+            borderRadius: "7px",
+            overflow: "hidden",
+          }}
+        >
+          {[
+            { mode: "cards", Icon: LayoutList },
+            { mode: "table", Icon: Table2 },
+          ].map(({ mode, Icon }) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              title={mode === "cards" ? "Card view" : "Table view"}
+              style={{
+                padding: "7px 10px",
+                border: "none",
+                cursor: "pointer",
+                background: viewMode === mode ? t.greenBg : t.surface,
+                color: viewMode === mode ? t.green : t.textMuted,
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <Icon size={14} />
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Transaction list */}
@@ -1069,7 +1187,182 @@ export default function Transactions() {
               : "No transactions yet. Add your first one!"}
           </p>
         </div>
+      ) : viewMode === "table" ? (
+        /* ── TABLE VIEW ─────────────────────────────────────────── */
+        <div
+          style={{
+            background: t.surface,
+            borderRadius: "14px",
+            border: `1px solid ${t.border}`,
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+              <thead>
+                <tr style={{ background: t.hover, borderBottom: `1px solid ${t.border}` }}>
+                  {["Date", "Merchant / Note", "Category", "Type", "Amount", ""].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: "10px 14px",
+                        textAlign: h === "Amount" ? "right" : "left",
+                        fontWeight: "700",
+                        fontSize: "11px",
+                        color: t.textSub,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((tx, idx) => (
+                  <tr
+                    key={tx._id}
+                    style={{
+                      borderBottom: idx < filtered.length - 1 ? `1px solid ${t.border}` : "none",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = t.hover)}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    {/* Date */}
+                    <td style={{ padding: "10px 14px", color: t.textSub, whiteSpace: "nowrap" }}>
+                      {tx.date
+                        ? new Date(tx.date).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : "—"}
+                    </td>
+
+                    {/* Merchant / Note */}
+                    <td style={{ padding: "10px 14px", maxWidth: "220px" }}>
+                      <p
+                        style={{
+                          fontWeight: "600",
+                          color: t.text,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          margin: 0,
+                        }}
+                      >
+                        {displayName(tx)}
+                      </p>
+                      {tx.note && tx.note !== tx.merchant && (
+                        <p
+                          style={{
+                            fontSize: "11px",
+                            color: t.textSub,
+                            margin: "2px 0 0",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {tx.note.slice(0, 50)}
+                        </p>
+                      )}
+                    </td>
+
+                    {/* Category */}
+                    <td style={{ padding: "10px 14px" }}>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          padding: "2px 8px",
+                          borderRadius: "20px",
+                          background: (CAT_COLORS[tx.category] || "#374151") + "22",
+                          color: CAT_COLORS[tx.category] || t.textMuted,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {tx.category || "Others"}
+                      </span>
+                    </td>
+
+                    {/* Type */}
+                    <td style={{ padding: "10px 14px" }}>
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          color: tx.type === "income" ? t.green : t.red,
+                          fontSize: "12px",
+                          fontWeight: "600",
+                        }}
+                      >
+                        {tx.type === "income" ? (
+                          <ArrowUpCircle size={13} />
+                        ) : (
+                          <ArrowDownCircle size={13} />
+                        )}
+                        {tx.type === "income" ? "Income" : "Expense"}
+                      </div>
+                    </td>
+
+                    {/* Amount */}
+                    <td
+                      style={{
+                        padding: "10px 14px",
+                        textAlign: "right",
+                        fontWeight: "700",
+                        fontSize: "14px",
+                        color: tx.type === "income" ? t.green : t.red,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {tx.type === "income" ? "+" : "-"}{fmt(tx.amount)}
+                    </td>
+
+                    {/* Delete */}
+                    <td style={{ padding: "10px 10px", textAlign: "center" }}>
+                      <button
+                        onClick={() => setConfirmDelete(tx._id)}
+                        title="Delete"
+                        style={{
+                          width: "26px",
+                          height: "26px",
+                          borderRadius: "6px",
+                          border: `1px solid ${t.border}`,
+                          background: "transparent",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer",
+                          color: t.textSub,
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = "#fef2f2";
+                          e.currentTarget.style.borderColor = "#fca5a5";
+                          e.currentTarget.querySelector("svg").style.color = "#dc2626";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "transparent";
+                          e.currentTarget.style.borderColor = t.border;
+                          e.currentTarget.querySelector("svg").style.color = t.textSub;
+                        }}
+                      >
+                        <Trash2 size={12} style={{ color: t.textSub, pointerEvents: "none" }} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
+        /* ── CARD VIEW ──────────────────────────────────────────── */
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
           {filtered.map((tx) => (
             <div

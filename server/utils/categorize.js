@@ -13,6 +13,7 @@ module.exports = function categorize(text) {
   if (
     m.includes("swiggy") ||
     m.includes("zomato") ||
+    m.includes("dunzo") ||
     m.includes("restaurant") ||
     m.includes("cafe") ||
     m.includes("food") ||
@@ -73,6 +74,8 @@ module.exports = function categorize(text) {
     m.includes("airtel") ||
     m.includes("jio") ||
     m.includes("bsnl") ||
+    m.includes(" vi ") ||
+    m.includes("vodafone") ||
     m.includes("postpaid") ||
     m.includes("bill payment") ||
     m.includes("bescom") ||
@@ -85,7 +88,7 @@ module.exports = function categorize(text) {
     m.includes("hotstar") ||
     m.includes("prime video") ||
     m.includes("spotify") ||
-    m.includes("youtube premium") ||
+    m.includes("youtube") ||
     m.includes("movie") ||
     m.includes("cinema") ||
     m.includes("bookmyshow") ||
@@ -103,6 +106,8 @@ module.exports = function categorize(text) {
     m.includes("doctor") ||
     m.includes("clinic") ||
     m.includes("apollo") ||
+    m.includes("practo") ||
+    m.includes("medplus") ||
     m.includes("netmeds") ||
     m.includes("1mg") ||
     m.includes("pharmeasy") ||
