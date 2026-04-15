@@ -88,132 +88,87 @@ function extractHDFCMerchant(narration) {
 function parseHDFCStatement(text) {
   const transactions = [];
 
-  // Normalize: collapse all whitespace runs to single space, keep newlines
   const lines = text
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // Join multi-line narrations — HDFC splits long narrations across lines
-  // A transaction line starts with a date pattern DD/MM/YY or DD/MM/YYYY
-  const DATE_RE = /^\d{2}\/\d{2}\/\d{2,4}/;
+  // KEY FIX: only treat a line as a new transaction start when DD/MM/YY is
+  // immediately followed by a letter.  HDFC narrations always begin with a
+  // letter (UPI, NEFT, ATM, …).  The Value-Date column (column 4) is also
+  // DD/MM/YY but appears alone on its line or is followed by a digit/space —
+  // the old DATE_RE matched it too, splitting each block in half so neither
+  // the original row nor the value-date "row" had enough amounts to parse.
+  const TXN_START_RE = /^\d{2}\/\d{2}\/\d{2}\s+[A-Za-z]/;
+  const AMOUNT_RE = /\b(\d{1,3}(?:,\d{2,3})*\.\d{2})\b/g;
 
-  const rows = [];
-  let currentRow = null;
+  // Group lines into per-transaction blocks
+  const blocks = [];
+  let current = null;
 
   for (const line of lines) {
-    if (DATE_RE.test(line)) {
-      if (currentRow) rows.push(currentRow);
-      currentRow = line;
-    } else if (currentRow) {
-      // Continuation of previous row (multi-line narration)
-      currentRow += " " + line;
+    if (TXN_START_RE.test(line)) {
+      if (current) blocks.push(current);
+      current = [line];
+    } else if (current) {
+      // continuation: narration overflow, ref-number line, value-date line,
+      // and the amounts line all land here
+      current.push(line);
     }
   }
-  if (currentRow) rows.push(currentRow);
+  if (current) blocks.push(current);
 
   let prevClosing = null;
 
-  for (const row of rows) {
-    // Extract all decimal amounts from the row — format: 1,234.56 or 123.45
-    const AMOUNT_RE = /\b(\d{1,3}(?:,\d{2,3})*\.\d{2})\b/g;
-    const allAmounts = [...row.matchAll(AMOUNT_RE)].map((m) => ({
-      raw: m[1],
-      value: parseAmount(m[1]),
-      index: m.index,
-    }));
+  for (const blockLines of blocks) {
+    const fullText = blockLines.join(" ");
 
-    // Need at least 2 amounts: one transaction amount + closing balance
-    if (allAmounts.length < 2) continue;
-
-    // Extract date at start
-    const dateMatch = row.match(/^(\d{2}\/\d{2}\/\d{2,4})/);
+    // Transaction date is always at the very start of the block
+    const dateMatch = fullText.match(/^(\d{2}\/\d{2}\/\d{2})/);
     if (!dateMatch) continue;
     const date = parseDate(dateMatch[1]);
 
-    // Closing balance = last amount
-    const closingBalance = allAmounts[allAmounts.length - 1].value;
+    // Collect every decimal amount in the block (handles Indian lakh format too)
+    const allAmounts = [...fullText.matchAll(AMOUNT_RE)].map((m) =>
+      parseAmount(m[1])
+    );
 
-    // Skip if closing balance looks invalid (too small or too large)
-    if (closingBalance < 0 || closingBalance > 99999999) continue;
+    // Need at least: transaction amount + closing balance
+    if (allAmounts.length < 2) continue;
 
-    // Get the narration — text between date and the first long ref number
-    const afterDate = row.slice(dateMatch[0].length).trim();
+    // Last amount = closing balance; second-to-last = withdrawal OR deposit
+    const closingBalance = allAmounts[allAmounts.length - 1];
+    if (closingBalance <= 0 || closingBalance > 99999999) continue;
 
-    // HDFC ref numbers are typically 12-20 digit pure-number strings
-    // Remove them from narration
-    const REF_RE = /\b\d{10,20}\b/g;
-    let narration = afterDate
-      .replace(REF_RE, " ")
-      .replace(AMOUNT_RE, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const txAmt = allAmounts[allAmounts.length - 2];
+    if (txAmt <= 0 || txAmt > 10000000) continue;
 
-    // Also remove value date (second date in row like "01/01/26")
-    narration = narration.replace(/\b\d{2}\/\d{2}\/\d{2,4}\b/g, "").trim();
-    narration = cleanNarration(narration);
-
-    if (!narration || narration.length < 3) continue;
-
-    // Determine transaction amount and type
-    // Strategy: compare closing balance to previous closing balance
+    // Balance direction tells us which column the amount belongs to
     let withdrawalAmt = 0;
     let depositAmt = 0;
-    let amount = 0;
-
-    if (allAmounts.length === 2) {
-      // Only one transaction amount before closing balance
-      amount = allAmounts[0].value;
-      if (prevClosing !== null) {
-        if (closingBalance > prevClosing) depositAmt = amount;
-        else withdrawalAmt = amount;
-      } else {
-        // First row — use narration to guess
-        const type = detectType(narration, 1, 0);
-        if (type === "income") depositAmt = amount;
-        else withdrawalAmt = amount;
-      }
-    } else if (allAmounts.length >= 3) {
-      // Could be withdrawal+closing, deposit+closing, or withdrawal+deposit+closing
-      // The transaction amounts are all except the last one
-      const txAmounts = allAmounts.slice(0, -1);
-
-      // Use balance direction to figure out which is debit/credit
-      if (prevClosing !== null) {
-        const balanceDiff = closingBalance - prevClosing;
-        if (balanceDiff > 0) {
-          // Balance went up — deposit
-          // Find the amount closest to balanceDiff
-          depositAmt = txAmounts.reduce((best, a) =>
-            Math.abs(a.value - balanceDiff) < Math.abs(best.value - balanceDiff)
-              ? a
-              : best,
-          ).value;
-        } else {
-          // Balance went down — withdrawal
-          withdrawalAmt = txAmounts.reduce((best, a) =>
-            Math.abs(a.value - Math.abs(balanceDiff)) <
-            Math.abs(best.value - Math.abs(balanceDiff))
-              ? a
-              : best,
-          ).value;
-        }
-      } else {
-        // No previous balance — take second-to-last as transaction amount
-        const txAmt = allAmounts[allAmounts.length - 2].value;
-        const type = detectType(narration, 1, 0);
-        if (type === "income") depositAmt = txAmt;
-        else withdrawalAmt = txAmt;
-      }
-      amount = depositAmt > 0 ? depositAmt : withdrawalAmt;
-    }
-
-    if (amount <= 0 || amount > 10000000) {
-      prevClosing = closingBalance;
-      continue;
+    if (prevClosing !== null) {
+      if (closingBalance >= prevClosing) depositAmt = txAmt;
+      else withdrawalAmt = txAmt;
+    } else {
+      // Very first transaction — fall back to keyword heuristic
+      const guess = detectType(fullText, 0, 0);
+      if (guess === "income") depositAmt = txAmt;
+      else withdrawalAmt = txAmt;
     }
 
     prevClosing = closingBalance;
+
+    // Build narration: remove transaction date, value date, ref numbers, amounts
+    let narration = fullText
+      .slice(dateMatch[0].length)                         // drop leading date
+      .replace(/\b\d{10,20}\b/g, " ")                    // strip Chq/Ref.No
+      .replace(/\b\d{1,3}(?:,\d{2,3})*\.\d{2}\b/g, " ") // strip amounts
+      .replace(/\b\d{2}\/\d{2}\/\d{2,4}\b/g, " ")        // strip value date
+      .replace(/\s+/g, " ")
+      .trim();
+    narration = cleanNarration(narration);
+
+    if (!narration || narration.length < 3) continue;
 
     const type = detectType(narration, withdrawalAmt, depositAmt);
     const merchant = extractHDFCMerchant(narration);
@@ -223,7 +178,7 @@ function parseHDFCStatement(text) {
       date,
       narration,
       merchant,
-      amount,
+      amount: txAmt,
       type,
       category,
       withdrawalAmt,
@@ -476,5 +431,80 @@ router.post("/upload", auth, upload.single("statement"), async (req, res) => {
 router.get("/test", auth, (req, res) =>
   res.json({ ok: true, message: "PDF upload endpoint working" }),
 );
+
+// POST /api/pdf/debug
+// Upload a PDF and get back raw extracted text + parser diagnostics without
+// saving anything to the database.  Useful for verifying what pdf-parse sees.
+//
+// Usage:
+//   curl -X POST https://<host>/api/pdf/debug \
+//        -H "Authorization: Bearer <token>" \
+//        -F "statement=@/path/to/statement.pdf"
+router.post("/debug", auth, upload.single("statement"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No PDF uploaded" });
+
+    let pdfData;
+    try {
+      pdfData = await pdfParse(req.file.buffer);
+    } catch (e) {
+      return res.status(400).json({ error: "pdf-parse failed: " + e.message });
+    }
+
+    const rawText = pdfData.text || "";
+    const bank = detectBank(rawText);
+
+    // Run the HDFC parser with internal visibility
+    const lines = rawText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    const TXN_START_RE = /^\d{2}\/\d{2}\/\d{2}\s+[A-Za-z]/;
+    const DATE_ONLY_RE = /^\d{2}\/\d{2}\/\d{2}\b/;
+
+    // Count how many lines look like transaction starts vs bare dates
+    let txnStartLines = 0;
+    let bareDateLines = 0;
+    for (const l of lines) {
+      if (TXN_START_RE.test(l)) txnStartLines++;
+      else if (DATE_ONLY_RE.test(l)) bareDateLines++;
+    }
+
+    // Run the full parser (no DB writes)
+    let parsed = [];
+    if (bank === "HDFC") parsed = parseHDFCStatement(rawText);
+    else if (bank === "SBI") parsed = parseSBIStatement(rawText);
+    else {
+      parsed = parseHDFCStatement(rawText);
+      if (parsed.length === 0) parsed = parseFallback(rawText);
+    }
+
+    res.json({
+      bank,
+      totalLines: lines.length,
+      txnStartLines,   // lines matching DD/MM/YY + letter  → new transaction anchors
+      bareDateLines,   // lines matching DD/MM/YY alone     → likely value-date lines
+      parsedCount: parsed.length,
+      // First 500 chars of raw text so you can see exactly what pdf-parse emits
+      rawTextPreview: rawText.slice(0, 500),
+      // First 100 lines (trimmed) so you can inspect the line-split structure
+      linesPreview: lines.slice(0, 100),
+      // First 5 parsed transactions for a quick sanity-check
+      parsedPreview: parsed.slice(0, 5).map((t) => ({
+        date: t.date.toISOString().slice(0, 10),
+        narration: t.narration,
+        merchant: t.merchant,
+        amount: t.amount,
+        type: t.type,
+        withdrawalAmt: t.withdrawalAmt,
+        depositAmt: t.depositAmt,
+        category: t.category,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;
