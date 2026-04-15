@@ -100,7 +100,7 @@ function parseHDFCStatement(text) {
   // DD/MM/YY but appears alone on its line or is followed by a digit/space —
   // the old DATE_RE matched it too, splitting each block in half so neither
   // the original row nor the value-date "row" had enough amounts to parse.
-  const TXN_START_RE = /^\d{2}\/\d{2}\/\d{2}\s+[A-Za-z]/;
+  const TXN_START_RE = /^\d{2}\/\d{2}\/\d{2}[A-Za-z]/;
   const AMOUNT_RE = /\b(\d{1,3}(?:,\d{2,3})*\.\d{2})\b/g;
 
   // Group lines into per-transaction blocks
@@ -161,7 +161,8 @@ function parseHDFCStatement(text) {
 
     // Build narration: remove transaction date, value date, ref numbers, amounts
     let narration = fullText
-      .slice(dateMatch[0].length)                         // drop leading date
+      .slice(dateMatch[0].length)                         // drop leading date (no space separator in HDFC PDFs)
+      .replace(/^\s*/, "")                                // drop any optional whitespace after date
       .replace(/\b\d{10,20}\b/g, " ")                    // strip Chq/Ref.No
       .replace(/\b\d{1,3}(?:,\d{2,3})*\.\d{2}\b/g, " ") // strip amounts
       .replace(/\b\d{2}\/\d{2}\/\d{2,4}\b/g, " ")        // strip value date
@@ -461,7 +462,7 @@ router.post("/debug", auth, upload.single("statement"), async (req, res) => {
       .map((l) => l.trim())
       .filter(Boolean);
 
-    const TXN_START_RE = /^\d{2}\/\d{2}\/\d{2}\s+[A-Za-z]/;
+    const TXN_START_RE = /^\d{2}\/\d{2}\/\d{2}[A-Za-z]/;
     const DATE_ONLY_RE = /^\d{2}\/\d{2}\/\d{2}\b/;
 
     // Count how many lines look like transaction starts vs bare dates
