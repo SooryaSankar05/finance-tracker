@@ -48,7 +48,8 @@
  *        by confidence and the best set wins.
  */
 
-const pdfParse = require("pdf-parse");
+const _pdfParseMod = require("pdf-parse");
+const pdfParse = typeof _pdfParseMod === "function" ? _pdfParseMod : _pdfParseMod.default;
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 

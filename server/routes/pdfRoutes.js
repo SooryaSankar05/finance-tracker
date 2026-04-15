@@ -4,7 +4,8 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const pdfParse = require("pdf-parse");
+const _pdfParseMod = require("pdf-parse");
+const pdfParse = typeof _pdfParseMod === "function" ? _pdfParseMod : _pdfParseMod.default;
 const auth = require("../middleware/auth");
 const Transaction = require("../models/Transaction");
 const categorize = require("../utils/categorize");
