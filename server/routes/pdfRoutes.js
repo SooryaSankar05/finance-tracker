@@ -132,8 +132,8 @@ function parseHDFCStatement(text) {
     // amounts — otherwise "02/01/266,000.00" is read as "266,000.00" instead of
     // "6,000.00" because the year digits bleed into the amount.
     const strippedAmountsLine = amountsLine
-      .replace(/^\d{10,}/, "")          // strip leading ref number
-      .replace(/\d{2}\/\d{2}\/\d{2}/, ""); // strip value date
+      .slice(16)                             // skip exactly 16-digit ref number
+      .replace(/^\d{2}\/\d{2}\/\d{2}/, ""); // strip value date DD/MM/YY
     const amountMatches = [...strippedAmountsLine.matchAll(/([\d,]+\.\d{2})/g)];
     if (amountMatches.length < 2) continue;
 
