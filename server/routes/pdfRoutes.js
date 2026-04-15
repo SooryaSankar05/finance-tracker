@@ -94,14 +94,10 @@ function parseHDFCStatement(text) {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  // KEY FIX: only treat a line as a new transaction start when DD/MM/YY is
-  // immediately followed by a letter.  HDFC narrations always begin with a
-  // letter (UPI, NEFT, ATM, …).  The Value-Date column (column 4) is also
-  // DD/MM/YY but appears alone on its line or is followed by a digit/space —
-  // the old DATE_RE matched it too, splitting each block in half so neither
-  // the original row nor the value-date "row" had enough amounts to parse.
+  // Transaction start: DD/MM/YY immediately followed by a letter (no space).
+  // Value-date lines (DD/MM/YY alone or followed by a digit) are NOT matched
+  // and become continuation lines instead of breaking the block.
   const TXN_START_RE = /^\d{2}\/\d{2}\/\d{2}[A-Za-z]/;
-  const AMOUNT_RE = /\b(\d{1,3}(?:,\d{2,3})*\.\d{2})\b/g;
 
   // Group lines into per-transaction blocks
   const blocks = [];
@@ -112,8 +108,6 @@ function parseHDFCStatement(text) {
       if (current) blocks.push(current);
       current = [line];
     } else if (current) {
-      // continuation: narration overflow, ref-number line, value-date line,
-      // and the amounts line all land here
       current.push(line);
     }
   }
@@ -122,27 +116,29 @@ function parseHDFCStatement(text) {
   let prevClosing = null;
 
   for (const blockLines of blocks) {
-    const fullText = blockLines.join(" ");
-
-    // Transaction date is always at the very start of the block
-    const dateMatch = fullText.match(/^(\d{2}\/\d{2}\/\d{2})/);
+    // Date is at the very start of the first line (no space before narration)
+    const dateMatch = blockLines[0].match(/^(\d{2}\/\d{2}\/\d{2})/);
     if (!dateMatch) continue;
     const date = parseDate(dateMatch[1]);
 
-    // Collect every decimal amount in the block (handles Indian lakh format too)
-    const allAmounts = [...fullText.matchAll(AMOUNT_RE)].map((m) =>
-      parseAmount(m[1])
-    );
+    // The amounts line starts with the 16-digit Chq/Ref.No column.
+    // Its raw form after pdf-parse merging:
+    //   {16-digit-ref}{DD/MM/YY}{txnAmt}{closingBalance}  — no spaces
+    // e.g. "000060056006069305/01/261.00243,583.47"
+    const amountsLine = blockLines.find((l) => /^\d{16}/.test(l));
+    if (!amountsLine) continue;
 
-    // Need at least: transaction amount + closing balance
-    if (allAmounts.length < 2) continue;
+    // Scan for every [\d,]+\.\d{2} in the amounts line.
+    // There are exactly 2: transaction amount (first) and closing balance (last).
+    // \b word boundaries are NOT used because the numbers are merged together.
+    const amountMatches = [...amountsLine.matchAll(/([\d,]+\.\d{2})/g)];
+    if (amountMatches.length < 2) continue;
 
-    // Last amount = closing balance; second-to-last = withdrawal OR deposit
-    const closingBalance = allAmounts[allAmounts.length - 1];
-    if (closingBalance <= 0 || closingBalance > 99999999) continue;
+    const txAmt = parseAmount(amountMatches[0][1]);
+    const closingBalance = parseAmount(amountMatches[amountMatches.length - 1][1]);
 
-    const txAmt = allAmounts[allAmounts.length - 2];
     if (txAmt <= 0 || txAmt > 10000000) continue;
+    if (closingBalance <= 0 || closingBalance > 99999999) continue;
 
     // Balance direction tells us which column the amount belongs to
     let withdrawalAmt = 0;
@@ -151,21 +147,26 @@ function parseHDFCStatement(text) {
       if (closingBalance >= prevClosing) depositAmt = txAmt;
       else withdrawalAmt = txAmt;
     } else {
-      // Very first transaction — fall back to keyword heuristic
-      const guess = detectType(fullText, 0, 0);
+      const guess = detectType(blockLines.join(" "), 0, 0);
       if (guess === "income") depositAmt = txAmt;
       else withdrawalAmt = txAmt;
     }
 
     prevClosing = closingBalance;
 
-    // Build narration: remove transaction date, value date, ref numbers, amounts
-    let narration = fullText
-      .slice(dateMatch[0].length)                         // drop leading date (no space separator in HDFC PDFs)
-      .replace(/^\s*/, "")                                // drop any optional whitespace after date
-      .replace(/\b\d{10,20}\b/g, " ")                    // strip Chq/Ref.No
-      .replace(/\b\d{1,3}(?:,\d{2,3})*\.\d{2}\b/g, " ") // strip amounts
-      .replace(/\b\d{2}\/\d{2}\/\d{2,4}\b/g, " ")        // strip value date
+    // Narration: all lines except the amounts line.
+    // Strip the leading DD/MM/YY from line 0 (no space separator).
+    const narrationParts = blockLines
+      .filter((l) => !(/^\d{16}/.test(l)))
+      .map((l, i) =>
+        i === 0 ? l.replace(/^\d{2}\/\d{2}\/\d{2}/, "") : l
+      );
+
+    let narration = narrationParts
+      .join(" ")
+      .replace(/\b\d{10,20}\b/g, " ")       // strip any stray ref numbers
+      .replace(/([\d,]+\.\d{2})/g, " ")      // strip any stray amounts
+      .replace(/\b\d{2}\/\d{2}\/\d{2,4}\b/g, " ") // strip value date
       .replace(/\s+/g, " ")
       .trim();
     narration = cleanNarration(narration);
