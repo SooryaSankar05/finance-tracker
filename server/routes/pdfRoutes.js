@@ -125,13 +125,15 @@ function parseHDFCStatement(text) {
     // Its raw form after pdf-parse merging:
     //   {16-digit-ref}{DD/MM/YY}{txnAmt}{closingBalance}  — no spaces
     // e.g. "000060056006069305/01/261.00243,583.47"
-    const amountsLine = blockLines.find((l) => /^\d{16}/.test(l));
+    const amountsLine = blockLines.find((l) => /^\d{16}/.test(l)) || "";
     if (!amountsLine) continue;
 
-    // Scan for every [\d,]+\.\d{2} in the amounts line.
-    // There are exactly 2: transaction amount (first) and closing balance (last).
-    // \b word boundaries are NOT used because the numbers are merged together.
-    const amountMatches = [...amountsLine.matchAll(/([\d,]+\.\d{2})/g)];
+    // Strip the value date (DD/MM/YY merged into the line) before scanning for
+    // amounts — otherwise "02/01/266,000.00" is read as "266,000.00" instead of
+    // "6,000.00" because the year digits bleed into the amount.
+    const strippedAmountsLine = amountsLine.replace(/\d{2}\/\d{2}\/\d{2}/, "");
+
+    const amountMatches = [...strippedAmountsLine.matchAll(/([\d,]+\.\d{2})/g)];
     if (amountMatches.length < 2) continue;
 
     const txAmt = parseAmount(amountMatches[0][1]);
