@@ -357,4 +357,39 @@ async function parseBankStatementPDF(buffer) {
   };
 }
 
-module.exports = { parseBankStatementPDF };
+/**
+ * parseTextWithStrategies(text)
+ *
+ * Applies the same three parsing strategies directly to raw text (e.g. from
+ * OCR) instead of extracting from a PDF buffer first.
+ *
+ * @param {string} text — raw text (e.g. Tesseract OCR output)
+ * @returns {Array<{date, merchant, amount}>}
+ */
+function parseTextWithStrategies(text) {
+  const normalized = normalizeText(text);
+  const lines = normalized.split("\n");
+
+  const results1 = strategyColumns(lines);
+  const results2 = strategyLoose(lines);
+  const results3 = strategyMultiLine(lines);
+
+  let best;
+  if (results1.length >= results2.length && results1.length >= results3.length) {
+    best = results1;
+  } else if (results2.length >= results3.length) {
+    best = results2;
+  } else {
+    best = results3;
+  }
+
+  if (best.length < 3) {
+    best = deduplicate([...results1, ...results2, ...results3]);
+  } else {
+    best = deduplicate(best);
+  }
+
+  return best;
+}
+
+module.exports = { parseBankStatementPDF, parseTextWithStrategies };

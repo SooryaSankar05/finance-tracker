@@ -10,7 +10,7 @@ const auth = require("../middleware/auth");
 const Transaction = require("../models/Transaction");
 const categorize = require("../utils/categorize");
 const extractMerchant = require("../utils/extractMerchant");
-const { parseBankStatementPDF } = require("../utils/parser");
+const { parseBankStatementPDF, parseTextWithStrategies } = require("../utils/parser");
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -299,6 +299,69 @@ function parseFallback(text) {
 // DETECT BANK TYPE FROM TEXT
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// OCR HELPER — converts each PDF page to an image then runs Tesseract on it
+// ─────────────────────────────────────────────────────────────
+
+async function performOCR(pdfBuffer) {
+  // pdfjs-dist v4+ ships only ESM (.mjs) — require() fails, use dynamic import
+  const { getDocument, GlobalWorkerOptions } = await import(
+    "pdfjs-dist/legacy/build/pdf.mjs"
+  );
+  const { createCanvas } = require("canvas");
+  const Tesseract = require("tesseract.js");
+
+  // Disable the web worker (not available in Node.js)
+  GlobalWorkerOptions.workerSrc = "";
+
+  // pdfjs-dist v4+ needs a CanvasFactory in Node — provide one backed by `canvas`
+  const canvasFactory = {
+    create(width, height) {
+      const canvas = createCanvas(width, height);
+      return { canvas, context: canvas.getContext("2d") };
+    },
+    reset(pair, width, height) {
+      pair.canvas.width = width;
+      pair.canvas.height = height;
+    },
+    destroy(pair) {
+      pair.canvas.width = 0;
+      pair.canvas.height = 0;
+    },
+  };
+
+  const uint8 = new Uint8Array(pdfBuffer);
+  const pdfDoc = await getDocument({
+    data: uint8,
+    verbosity: 0,
+    canvasFactory,
+  }).promise;
+
+  let fullText = "";
+  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+    const page = await pdfDoc.getPage(pageNum);
+
+    // 2× scale for better OCR accuracy on small text
+    const viewport = page.getViewport({ scale: 2 });
+    const pair = canvasFactory.create(
+      Math.ceil(viewport.width),
+      Math.ceil(viewport.height),
+    );
+
+    await page.render({ canvasContext: pair.context, viewport, canvasFactory })
+      .promise;
+
+    const pngBuffer = pair.canvas.toBuffer("image/png");
+
+    const {
+      data: { text },
+    } = await Tesseract.recognize(pngBuffer, "eng", { logger: () => {} });
+    fullText += text + "\n";
+  }
+
+  return fullText;
+}
+
 function detectBank(text) {
   const t = text.slice(0, 2000).toUpperCase();
   if (t.includes("HDFC BANK")) return "HDFC";
@@ -318,54 +381,80 @@ router.post("/upload", auth, upload.single("statement"), async (req, res) => {
     if (!req.file)
       return res.status(400).json({ error: "No PDF file uploaded" });
 
-    let pdfData;
+    // ── Phase 1: attempt text extraction ──────────────────────────────────────
+    // For scanned PDFs pdf-parse either throws or returns near-empty text.
+    // Neither case is fatal here — we fall through to OCR instead of aborting.
+    let text = "";
     try {
-      pdfData = await pdfParse(req.file.buffer);
+      const pdfData = await pdfParse(req.file.buffer);
+      text = pdfData.text || "";
     } catch (e) {
-      return res.status(400).json({
-        error:
-          "Could not read PDF. Make sure it's a text-based PDF, not a scanned image.",
-      });
+      console.log("pdf-parse could not extract text — will attempt OCR:", e.message);
     }
 
-    const text = pdfData.text;
-    if (!text || text.trim().length < 50) {
-      return res.status(400).json({
-        error: "PDF appears to be empty or scanned. Text-based PDFs only.",
-      });
-    }
-
-    const bank = detectBank(text);
+    // ── Phase 2: run text-based parsers (only when there is enough text) ──────
     let parsed = [];
+    let bank = "GENERIC";
 
-    if (bank === "HDFC") {
-      parsed = parseHDFCStatement(text);
-    } else if (bank === "SBI") {
-      parsed = parseSBIStatement(text);
-    } else {
-      parsed = parseHDFCStatement(text); // Try HDFC format first
-      if (parsed.length === 0) parsed = parseFallback(text);
-    }
+    if (text.trim().length >= 50) {
+      bank = detectBank(text);
 
-    // Tertiary fallback: use the multi-strategy generic parser
-    if (parsed.length === 0) {
-      try {
-        const generic = await parseBankStatementPDF(req.file.buffer);
-        parsed = generic.transactions.map((t) => ({
-          date: new Date(t.date),
-          narration: t.merchant,
-          merchant: t.merchant,
-          amount: Math.abs(t.amount),
-          type: t.amount >= 0 ? "income" : "expense",
-          category: categorize(t.merchant),
-          withdrawalAmt: t.amount < 0 ? Math.abs(t.amount) : 0,
-          depositAmt: t.amount >= 0 ? t.amount : 0,
-        }));
-      } catch (e) {
-        console.error("Generic parser error:", e.message);
+      if (bank === "HDFC") {
+        parsed = parseHDFCStatement(text);
+      } else if (bank === "SBI") {
+        parsed = parseSBIStatement(text);
+      } else {
+        parsed = parseHDFCStatement(text);
+        if (parsed.length === 0) parsed = parseFallback(text);
+      }
+
+      // Tertiary text fallback: multi-strategy generic parser
+      if (parsed.length === 0) {
+        try {
+          const generic = await parseBankStatementPDF(req.file.buffer);
+          parsed = generic.transactions.map((t) => ({
+            date: new Date(t.date),
+            narration: t.merchant,
+            merchant: t.merchant,
+            amount: Math.abs(t.amount),
+            type: t.amount >= 0 ? "income" : "expense",
+            category: categorize(t.merchant),
+            withdrawalAmt: t.amount < 0 ? Math.abs(t.amount) : 0,
+            depositAmt: t.amount >= 0 ? t.amount : 0,
+          }));
+        } catch (e) {
+          console.error("Generic parser error:", e.message);
+        }
       }
     }
 
+    // ── Phase 3: OCR — reached when text extraction failed OR all parsers got 0
+    if (parsed.length === 0) {
+      try {
+        console.log("Text parsers found 0 transactions — attempting OCR...");
+        const ocrText = await performOCR(req.file.buffer);
+        if (ocrText && ocrText.trim().length > 50) {
+          parsed = parseFallback(ocrText);
+          if (parsed.length === 0) {
+            const ocrStrategies = parseTextWithStrategies(ocrText);
+            parsed = ocrStrategies.map((t) => ({
+              date: new Date(t.date),
+              narration: t.merchant,
+              merchant: t.merchant,
+              amount: Math.abs(t.amount),
+              type: t.amount >= 0 ? "income" : "expense",
+              category: categorize(t.merchant),
+              withdrawalAmt: t.amount < 0 ? Math.abs(t.amount) : 0,
+              depositAmt: t.amount >= 0 ? t.amount : 0,
+            }));
+          }
+        }
+      } catch (ocrErr) {
+        console.error("OCR error:", ocrErr.message);
+      }
+    }
+
+    // ── Phase 4: give up only after OCR also returns nothing ─────────────────
     if (parsed.length === 0) {
       return res.status(422).json({
         error:
