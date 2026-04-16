@@ -79,6 +79,7 @@ export default function Transactions() {
 
   // PDF state
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfLoadingMsg, setPdfLoadingMsg] = useState("Parsing your bank statement...");
   const [pdfResult, setPdfResult] = useState(null);
   const [pdfError, setPdfError] = useState("");
   const [pdfErrorType, setPdfErrorType] = useState("generic"); // "generic" | "scanned"
@@ -89,6 +90,18 @@ export default function Transactions() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // After 5 s of loading, hint that OCR may be running
+  useEffect(() => {
+    if (!pdfLoading) {
+      setPdfLoadingMsg("Parsing your bank statement...");
+      return;
+    }
+    const timer = setTimeout(() => {
+      setPdfLoadingMsg("Attempting OCR scan...");
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [pdfLoading]);
 
   useEffect(() => {
     let r = data;
@@ -823,7 +836,7 @@ export default function Transactions() {
               <span
                 style={{ color: t.green, fontSize: "14px", fontWeight: "600" }}
               >
-                Parsing your bank statement...
+                {pdfLoadingMsg}
               </span>
               <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
             </div>
