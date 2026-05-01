@@ -137,7 +137,7 @@ export default function AIAssistant() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          height: "calc(100vh - 110px)",
+          minHeight: "55vh",
           flexDirection: "column",
           gap: "12px",
           color: t.textSub,
@@ -154,7 +154,7 @@ export default function AIAssistant() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 110px)",
+        minHeight: "65vh",
         fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
@@ -294,7 +294,7 @@ export default function AIAssistant() {
 
             <div
               style={{
-                maxWidth: "72%",
+                maxWidth: "min(720px, 88%)",
                 background: msg.role === "user" ? t.green : t.surface,
                 color: msg.role === "user" ? "#fff" : t.text,
                 borderRadius:
@@ -457,8 +457,8 @@ export default function AIAssistant() {
           onClick={() => send()}
           disabled={!input.trim() || loading}
           style={{
-            width: "34px",
-            height: "34px",
+            width: "44px",
+            height: "44px",
             borderRadius: "10px",
             background: !input.trim() || loading ? t.border : t.green,
             border: "none",
@@ -471,7 +471,7 @@ export default function AIAssistant() {
           }}
         >
           <Send
-            size={14}
+            size={18}
             color={!input.trim() || loading ? t.textSub : "#fff"}
           />
         </button>

@@ -434,9 +434,8 @@ export default function Dashboard() {
 
       {/* Stat cards */}
       <div
+        className="grid grid-1 grid-md-2 grid-lg-4"
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4,1fr)",
           gap: "12px",
           marginBottom: "16px",
         }}
@@ -474,6 +473,7 @@ export default function Dashboard() {
             display: "flex",
             gap: "28px",
             alignItems: "center",
+            flexWrap: "wrap",
           }}
         >
           <p
@@ -526,9 +526,8 @@ export default function Dashboard() {
 
       {/* Charts row 1 */}
       <div
+        className="grid grid-1 grid-lg-2"
         style={{
-          display: "grid",
-          gridTemplateColumns: "1.5fr 1fr",
           gap: "14px",
           marginBottom: "14px",
         }}
@@ -665,9 +664,8 @@ export default function Dashboard() {
 
       {/* Charts row 2 */}
       <div
+        className="grid grid-1 grid-md-2"
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
           gap: "14px",
           marginBottom: "14px",
         }}
@@ -863,6 +861,8 @@ export default function Dashboard() {
                     justifyContent: "space-between",
                     alignItems: "center",
                     marginBottom: "5px",
+                    flexWrap: "wrap",
+                    rowGap: "6px",
                   }}
                 >
                   {/* Left: colour dot + name + over-budget badge */}
@@ -1161,9 +1161,8 @@ export default function Dashboard() {
             }}
           >
             <div
+              className="formGrid formGrid-md-2"
               style={{
-                display: "grid",
-                gridTemplateColumns: "auto 1fr 1fr 1fr 1fr",
                 gap: "10px",
                 alignItems: "end",
               }}
@@ -1185,7 +1184,8 @@ export default function Dashboard() {
                     setGForm((f) => ({ ...f, emoji: e.target.value }))
                   }
                   style={{
-                    width: "48px",
+                    width: "100%",
+                    maxWidth: "80px",
                     padding: "8px",
                     border: `1.5px solid ${t.border}`,
                     borderRadius: "8px",

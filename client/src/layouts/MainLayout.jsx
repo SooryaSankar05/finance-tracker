@@ -1,4 +1,5 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Receipt,
@@ -9,6 +10,8 @@ import {
   Users,
   Sun,
   Moon,
+  Menu,
+  X,
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import { useOnlineStatus } from "../hooks/useOffline";
@@ -63,10 +66,19 @@ function ThemeSlider() {
 export default function MainLayout() {
   const { t } = useTheme();
   const { online, serverReachable } = useOnlineStatus();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth >= 768) setMobileNavOpen(false);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: t.bg }}>
-      <Sidebar />
+      <Sidebar mobileOpen={mobileNavOpen} setMobileOpen={setMobileNavOpen} />
       <div
         style={{
           flex: 1,
@@ -95,17 +107,39 @@ export default function MainLayout() {
         {/* Top bar */}
         <div
           style={{
-            height: "52px",
+            minHeight: "52px",
             background: t.surface,
             borderBottom: `1px solid ${t.border}`,
             display: "flex",
             alignItems: "center",
-            justifyContent: "flex-end",
-            padding: "0 24px",
+            justifyContent: "space-between",
+            padding: "0 14px",
             flexShrink: 0,
             gap: "16px",
           }}
         >
+          {/* Mobile hamburger */}
+          <button
+            className="tapTarget topbarHamburger"
+            onClick={() => setMobileNavOpen(true)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "transparent",
+              border: `1px solid ${t.border}`,
+              borderRadius: "10px",
+              padding: "8px",
+              cursor: "pointer",
+              color: t.text,
+            }}
+            title="Open menu"
+          >
+            <Menu size={18} />
+          </button>
+
+          <div style={{ flex: 1 }} />
+
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <div
               style={{
@@ -122,15 +156,17 @@ export default function MainLayout() {
           <ThemeSlider />
         </div>
         {/* Page content */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "26px 30px" }}>
-          <Outlet />
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          <div className="container" style={{ paddingTop: "18px", paddingBottom: "18px" }}>
+            <Outlet />
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function Sidebar() {
+function Sidebar({ mobileOpen, setMobileOpen }) {
   const location = useLocation();
   const { t } = useTheme();
 
@@ -143,100 +179,242 @@ function Sidebar() {
   ];
 
   return (
-    <div
-      style={{
-        width: "215px",
-        background: t.surface,
-        borderRight: `1px solid ${t.border}`,
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        padding: "22px 12px",
-        position: "sticky",
-        top: 0,
-        height: "100vh",
-        flexShrink: 0,
-      }}
-    >
-      <div>
+    <>
+      {/* Mobile overlay */}
+      {mobileOpen && (
         <div
+          onClick={() => setMobileOpen(false)}
+          className="sidebarOverlay"
+          style={{
+            cursor: "pointer",
+          }}
+        />
+      )}
+
+      <div
+        className="sidebarDrawer"
+        style={{
+          width: "240px",
+          maxWidth: "82vw",
+          background: t.surface,
+          borderRight: `1px solid ${t.border}`,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          padding: "18px 12px",
+          position: "fixed",
+          top: 0,
+          left: 0,
+          height: "100vh",
+          zIndex: 1001,
+          transform: mobileOpen ? "translateX(0)" : "translateX(-105%)",
+          transition: "transform 0.2s ease",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "10px",
+              marginBottom: "18px",
+              paddingLeft: "7px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <TrendingUp size={19} color={t.green} strokeWidth={2.5} />
+              <span
+                style={{
+                  fontSize: "17px",
+                  fontWeight: "800",
+                  color: t.text,
+                  letterSpacing: "-0.5px",
+                }}
+              >
+                MoneyMind
+              </span>
+            </div>
+            <button
+              className="tapTarget"
+              onClick={() => setMobileOpen(false)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "transparent",
+                border: `1px solid ${t.border}`,
+                borderRadius: "10px",
+                padding: "8px",
+                cursor: "pointer",
+                color: t.text,
+              }}
+              title="Close menu"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <nav style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+            {navItems.map((item) => {
+              const active = location.pathname === item.path;
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={() => setMobileOpen(false)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "9px",
+                    padding: "10px 10px",
+                    borderRadius: "10px",
+                    textDecoration: "none",
+                    fontSize: "13px",
+                    fontWeight: active ? "600" : "500",
+                    background: active ? t.greenBg : "transparent",
+                    color: active ? t.green : t.textMuted,
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!active) e.currentTarget.style.background = t.hover;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!active) e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  <Icon size={15} strokeWidth={active ? 2.2 : 1.8} />
+                  {item.name}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        <button
+          onClick={() => {
+            localStorage.removeItem("token");
+            window.location.href = "/login";
+          }}
           style={{
             display: "flex",
             alignItems: "center",
             gap: "8px",
-            marginBottom: "30px",
-            paddingLeft: "7px",
+            padding: "10px 10px",
+            borderRadius: "10px",
+            border: "none",
+            background: "transparent",
+            color: t.red,
+            fontSize: "13px",
+            fontWeight: "500",
+            cursor: "pointer",
+            width: "100%",
+            textAlign: "left",
           }}
         >
-          <TrendingUp size={19} color={t.green} strokeWidth={2.5} />
-          <span
-            style={{
-              fontSize: "17px",
-              fontWeight: "800",
-              color: t.text,
-              letterSpacing: "-0.5px",
-            }}
-          >
-            MoneyMind
-          </span>
-        </div>
-        <nav style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-          {navItems.map((item) => {
-            const active = location.pathname === item.path;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "9px",
-                  padding: "9px 10px",
-                  borderRadius: "10px",
-                  textDecoration: "none",
-                  fontSize: "13px",
-                  fontWeight: active ? "600" : "500",
-                  background: active ? t.greenBg : "transparent",
-                  color: active ? t.green : t.textMuted,
-                  transition: "all 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  if (!active) e.currentTarget.style.background = t.hover;
-                }}
-                onMouseLeave={(e) => {
-                  if (!active) e.currentTarget.style.background = "transparent";
-                }}
-              >
-                <Icon size={15} strokeWidth={active ? 2.2 : 1.8} />
-                {item.name}
-              </Link>
-            );
-          })}
-        </nav>
+          <LogOut size={14} /> Log Out
+        </button>
       </div>
-      <button
-        onClick={() => {
-          localStorage.removeItem("token");
-          window.location.href = "/login";
-        }}
+
+      {/* Desktop static sidebar */}
+      <div
+        className="sidebarDesktop"
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          padding: "9px 10px",
-          borderRadius: "10px",
-          border: "none",
-          background: "transparent",
-          color: t.red,
-          fontSize: "13px",
-          fontWeight: "500",
-          cursor: "pointer",
-          width: "100%",
+          width: "240px",
+          background: t.surface,
+          borderRight: `1px solid ${t.border}`,
+          display: "none",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          padding: "22px 12px",
+          position: "sticky",
+          top: 0,
+          height: "100vh",
+          flexShrink: 0,
         }}
       >
-        <LogOut size={14} /> Log Out
-      </button>
-    </div>
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              marginBottom: "30px",
+              paddingLeft: "7px",
+            }}
+          >
+            <TrendingUp size={19} color={t.green} strokeWidth={2.5} />
+            <span
+              style={{
+                fontSize: "17px",
+                fontWeight: "800",
+                color: t.text,
+                letterSpacing: "-0.5px",
+              }}
+            >
+              MoneyMind
+            </span>
+          </div>
+          <nav style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+            {navItems.map((item) => {
+              const active = location.pathname === item.path;
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "9px",
+                    padding: "9px 10px",
+                    borderRadius: "10px",
+                    textDecoration: "none",
+                    fontSize: "13px",
+                    fontWeight: active ? "600" : "500",
+                    background: active ? t.greenBg : "transparent",
+                    color: active ? t.green : t.textMuted,
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!active) e.currentTarget.style.background = t.hover;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!active) e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  <Icon size={15} strokeWidth={active ? 2.2 : 1.8} />
+                  {item.name}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+        <button
+          onClick={() => {
+            localStorage.removeItem("token");
+            window.location.href = "/login";
+          }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "9px 10px",
+            borderRadius: "10px",
+            border: "none",
+            background: "transparent",
+            color: t.red,
+            fontSize: "13px",
+            fontWeight: "500",
+            cursor: "pointer",
+            width: "100%",
+          }}
+        >
+          <LogOut size={14} /> Log Out
+        </button>
+      </div>
+
+    </>
   );
 }

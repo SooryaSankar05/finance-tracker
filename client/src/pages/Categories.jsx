@@ -306,7 +306,7 @@ export default function Categories() {
       </div>
 
       {!loading && insights && (
-        <div style={{ display: "flex", gap: "12px", marginBottom: "18px" }}>
+        <div className="grid grid-1 grid-md-3" style={{ gap: "12px", marginBottom: "18px" }}>
           {[
             {
               label: "Total Income",
@@ -329,7 +329,6 @@ export default function Categories() {
             <div
               key={i}
               style={{
-                flex: 1,
                 background: t.surface,
                 borderRadius: "12px",
                 padding: "14px 16px",
@@ -414,9 +413,8 @@ export default function Categories() {
         </div>
       ) : (
         <div
+          className="grid grid-1 grid-md-2 grid-lg-3"
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3,1fr)",
             gap: "12px",
           }}
         >

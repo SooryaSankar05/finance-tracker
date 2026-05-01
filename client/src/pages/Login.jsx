@@ -146,9 +146,11 @@ export default function Login() {
 
   return (
     <div
+      className="loginShell"
       style={{
         minHeight: "100vh",
         display: "flex",
+        flexDirection: "column",
         background: "#f0f4f8",
         fontFamily: "'DM Sans', 'Segoe UI', system-ui, sans-serif",
         opacity: mounted ? 1 : 0,
@@ -242,19 +244,34 @@ export default function Login() {
           opacity: 0.7;
           cursor: not-allowed;
         }
+
+        .loginLeft {
+          width: 100%;
+          min-height: 320px;
+        }
+
+        @media (min-width: 768px) {
+          .loginShell {
+            flex-direction: row;
+          }
+          .loginLeft {
+            width: 45%;
+            min-height: 100vh;
+          }
+        }
       `}</style>
 
       {/* ── LEFT PANEL ── */}
       <div
+        className="loginLeft"
         style={{
-          width: "45%",
           background:
             "linear-gradient(145deg, #15803d 0%, #166534 50%, #14532d 100%)",
           position: "relative",
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
-          padding: "60px 52px",
+          padding: "40px 22px",
           overflow: "hidden",
         }}
       >
@@ -303,7 +320,7 @@ export default function Login() {
           <h1
             style={{
               fontFamily: "'Syne', sans-serif",
-              fontSize: "38px",
+              fontSize: "clamp(28px, 6vw, 38px)",
               fontWeight: "800",
               color: "#fff",
               lineHeight: "1.15",

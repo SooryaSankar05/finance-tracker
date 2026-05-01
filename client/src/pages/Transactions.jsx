@@ -399,6 +399,8 @@ export default function Transactions() {
           justifyContent: "space-between",
           alignItems: "flex-start",
           marginBottom: "20px",
+          gap: "12px",
+          flexWrap: "wrap",
         }}
       >
         <div>
@@ -416,7 +418,7 @@ export default function Transactions() {
             {data.length} total
           </p>
         </div>
-        <div style={{ display: "flex", gap: "7px" }}>
+        <div style={{ display: "flex", gap: "7px", flexWrap: "wrap" }}>
           {[
             { mode: "sms", label: "Paste SMS", Icon: MessageSquare },
             { mode: "manual", label: "Manual", Icon: PenLine },
@@ -1042,7 +1044,7 @@ export default function Transactions() {
       )}
 
       {/* Summary */}
-      <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
+      <div className="grid grid-1 grid-md-2 grid-lg-4" style={{ gap: "10px", marginBottom: "16px" }}>
         {[
           {
             label: "Total",
@@ -1060,7 +1062,6 @@ export default function Transactions() {
           <div
             key={i}
             style={{
-              flex: 1,
               background: t.surface,
               borderRadius: "11px",
               padding: "12px 14px",
@@ -1094,9 +1095,10 @@ export default function Transactions() {
           display: "flex",
           gap: "10px",
           alignItems: "center",
+          flexWrap: "wrap",
         }}
       >
-        <div style={{ position: "relative", flex: 1 }}>
+        <div style={{ position: "relative", flex: 1, minWidth: "220px" }}>
           <Search
             size={13}
             color={t.textSub}
@@ -1129,24 +1131,26 @@ export default function Transactions() {
             onBlur={(e) => (e.target.style.borderColor = t.border)}
           />
         </div>
-        {["all", "income", "expense"].map((f) => (
-          <button
-            key={f}
-            onClick={() => setTypeFilter(f)}
-            style={{
-              padding: "7px 12px",
-              borderRadius: "7px",
-              fontSize: "12px",
-              fontWeight: "500",
-              cursor: "pointer",
-              border: `1.5px solid ${typeFilter === f ? t.green : t.border}`,
-              background: typeFilter === f ? t.greenBg : t.surface,
-              color: typeFilter === f ? t.green : t.textMuted,
-            }}
-          >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          {["all", "income", "expense"].map((f) => (
+            <button
+              key={f}
+              onClick={() => setTypeFilter(f)}
+              style={{
+                padding: "7px 12px",
+                borderRadius: "7px",
+                fontSize: "12px",
+                fontWeight: "500",
+                cursor: "pointer",
+                border: `1.5px solid ${typeFilter === f ? t.green : t.border}`,
+                background: typeFilter === f ? t.greenBg : t.surface,
+                color: typeFilter === f ? t.green : t.textMuted,
+              }}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
         <div
           style={{
             display: "flex",
@@ -1210,7 +1214,7 @@ export default function Transactions() {
             overflow: "hidden",
           }}
         >
-          <div style={{ overflowX: "auto" }}>
+          <div className="scrollX">
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
               <thead>
                 <tr style={{ background: t.hover, borderBottom: `1px solid ${t.border}` }}>

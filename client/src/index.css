@@ -12,6 +12,159 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+/* --- Mobile-first responsive helpers --- */
+:root {
+  --container-max: 1100px;
+  --gutter: 16px;
+}
+
+.container {
+  width: 100%;
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+}
+.grid-1 {
+  grid-template-columns: 1fr;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.formGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+.hideMobile {
+  display: none;
+}
+
+.showMobile {
+  display: block;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.scrollX {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tapTarget {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.sidebarOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1000;
+}
+
+.sidebarDrawer {
+  display: flex;
+}
+
+.sidebarDesktop {
+  display: none;
+}
+
+.topbarHamburger {
+  display: inline-flex;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --gutter: 20px;
+  }
+
+  .grid-md-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .grid-md-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .row-md-nowrap {
+    flex-wrap: nowrap;
+  }
+
+  .formGrid-md-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .formGrid-md-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .hideMobile {
+    display: block;
+  }
+  .showMobile {
+    display: none;
+  }
+
+  .sidebarOverlay {
+    display: none;
+  }
+  .sidebarDrawer {
+    display: none;
+  }
+  .sidebarDesktop {
+    display: flex;
+  }
+  .topbarHamburger {
+    display: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --gutter: 24px;
+  }
+
+  .grid-lg-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .grid-lg-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 ::-webkit-scrollbar {

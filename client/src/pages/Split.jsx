@@ -241,6 +241,8 @@ export default function Split() {
           justifyContent: "space-between",
           alignItems: "flex-start",
           marginBottom: "22px",
+          gap: "12px",
+          flexWrap: "wrap",
         }}
       >
         <div>
@@ -280,9 +282,8 @@ export default function Split() {
 
       {/* ── Summary cards ──────────────────────────────── */}
       <div
+        className="grid grid-1 grid-md-3"
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
           gap: "12px",
           marginBottom: "20px",
         }}
@@ -410,11 +411,8 @@ export default function Split() {
           </div>
 
           <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "12px",
-            }}
+            className="formGrid formGrid-md-2"
+            style={{ gap: "12px" }}
           >
             <div style={{ gridColumn: "1 / -1" }}>
               <label
