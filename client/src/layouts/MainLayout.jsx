@@ -84,7 +84,7 @@ export default function MainLayout() {
           flex: 1,
           display: "flex",
           flexDirection: "column",
-          overflow: "hidden",
+          overflow: "visible",
           minWidth: 0,
         }}
       >
@@ -106,6 +106,7 @@ export default function MainLayout() {
         )}
         {/* Top bar */}
         <div
+          className="topbarFixed"
           style={{
             minHeight: "52px",
             background: t.surface,
@@ -116,6 +117,8 @@ export default function MainLayout() {
             padding: "0 14px",
             flexShrink: 0,
             gap: "16px",
+            /* solid background + avoid bleed-through */
+            boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
           }}
         >
           {/* Mobile hamburger */}
@@ -156,8 +159,11 @@ export default function MainLayout() {
           <ThemeSlider />
         </div>
         {/* Page content */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          <div className="container" style={{ paddingTop: "18px", paddingBottom: "18px" }}>
+        <div style={{ flex: 1 }} className="topbarSpacer">
+          <div
+            className="container"
+            style={{ paddingTop: "18px", paddingBottom: "18px" }}
+          >
             <Outlet />
           </div>
         </div>

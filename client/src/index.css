@@ -33,6 +33,8 @@ canvas {
 :root {
   --container-max: 1100px;
   --gutter: 16px;
+  --topbar-h: 52px;
+  --sidebar-w: 240px;
 }
 
 .container {
@@ -111,6 +113,19 @@ canvas {
   display: inline-flex;
 }
 
+.topbarFixed {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1100;
+  width: 100%;
+}
+
+.topbarSpacer {
+  padding-top: var(--topbar-h);
+}
+
 @media (min-width: 768px) {
   :root {
     --gutter: 20px;
@@ -151,6 +166,11 @@ canvas {
   }
   .topbarHamburger {
     display: none;
+  }
+
+  /* Keep the fixed topbar aligned with main content (not covering sidebar) */
+  .topbarFixed {
+    padding-left: var(--sidebar-w);
   }
 }
 
