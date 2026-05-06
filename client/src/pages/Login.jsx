@@ -247,7 +247,19 @@ export default function Login() {
 
         .loginLeft {
           width: 100%;
-          min-height: 320px;
+          min-height: 220px;
+        }
+        .login-stat-pills {
+          display: none;
+        }
+
+        @media (min-width: 480px) {
+          .loginLeft {
+            min-height: 280px;
+          }
+          .login-stat-pills {
+            display: flex;
+          }
         }
 
         @media (min-width: 768px) {
@@ -257,6 +269,9 @@ export default function Login() {
           .loginLeft {
             width: 45%;
             min-height: 100vh;
+          }
+          .login-stat-pills {
+            display: flex;
           }
         }
       `}</style>
@@ -391,7 +406,7 @@ export default function Login() {
         </div>
 
         {/* Stat pills */}
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+        <div className="login-stat-pills" style={{ gap: "10px", flexWrap: "wrap" }}>
           <StatPill
             icon="💸"
             label="Avg. tracked"
@@ -429,6 +444,7 @@ export default function Login() {
           alignItems: "center",
           justifyContent: "center",
           padding: "40px 24px",
+          background: "#fff",
         }}
       >
         <div
@@ -684,7 +700,8 @@ export default function Login() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              gap: "20px",
+              flexWrap: "wrap",
+              gap: "12px 20px",
               marginTop: "32px",
               paddingTop: "24px",
               borderTop: "1px solid #e2e8f0",
