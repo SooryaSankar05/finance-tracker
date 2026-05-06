@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import API from "../services/api";
 import { TrendingUp, Eye, EyeOff, ArrowRight, Check } from "lucide-react";
 
-// Animated floating orbs for the left panel background
 function Orbs() {
   return (
     <div
@@ -38,7 +37,6 @@ function Orbs() {
   );
 }
 
-// Stat pill shown on left panel
 function StatPill({ icon, label, value, delay }) {
   return (
     <div
@@ -51,7 +49,7 @@ function StatPill({ icon, label, value, delay }) {
         borderRadius: "14px",
         padding: "12px 16px",
         border: "1px solid rgba(255,255,255,0.18)",
-        animation: `slideUp 0.6s ease both`,
+        animation: "slideUp 0.6s ease both",
         animationDelay: delay,
       }}
     >
@@ -150,8 +148,6 @@ export default function Login() {
       style={{
         minHeight: "100vh",
         display: "flex",
-        flexDirection: "column",
-        background: "#f0f4f8",
         fontFamily: "'DM Sans', 'Segoe UI', system-ui, sans-serif",
         opacity: mounted ? 1 : 0,
         transition: "opacity 0.4s ease",
@@ -159,7 +155,9 @@ export default function Login() {
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Syne:wght@700;800&display=swap');
-        
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
         @keyframes float {
           from { transform: translateY(0px) scale(1); }
           to   { transform: translateY(-30px) scale(1.05); }
@@ -179,6 +177,8 @@ export default function Login() {
           0%   { background-position: -200% 0; }
           100% { background-position: 200% 0; }
         }
+
+        /* ── Inputs ── */
         .login-input {
           width: 100%;
           padding: 13px 16px;
@@ -197,6 +197,8 @@ export default function Login() {
           box-shadow: 0 0 0 3px rgba(22,163,74,0.1);
         }
         .login-input::placeholder { color: #a0aec0; }
+
+        /* ── Tabs ── */
         .tab-btn {
           flex: 1;
           padding: 9px;
@@ -215,6 +217,8 @@ export default function Login() {
           color: #1a202c;
           box-shadow: 0 1px 4px rgba(0,0,0,0.1);
         }
+
+        /* ── Submit button ── */
         .submit-btn {
           width: 100%;
           padding: 14px;
@@ -237,42 +241,50 @@ export default function Login() {
           transform: translateY(-1px);
           box-shadow: 0 6px 20px rgba(22,163,74,0.45);
         }
-        .submit-btn:active:not(:disabled) {
-          transform: translateY(0);
-        }
-        .submit-btn:disabled {
-          opacity: 0.7;
-          cursor: not-allowed;
-        }
+        .submit-btn:active:not(:disabled) { transform: translateY(0); }
+        .submit-btn:disabled { opacity: 0.7; cursor: not-allowed; }
 
+        /* ── Shell: mobile = column, desktop = row ── */
+        .loginShell { flex-direction: column; }
+
+        /* ── Left panel ── */
         .loginLeft {
           width: 100%;
-          min-height: 220px;
-        }
-        .login-stat-pills {
-          display: none;
-        }
-
-        @media (min-width: 480px) {
-          .loginLeft {
-            min-height: 280px;
-          }
-          .login-stat-pills {
-            display: flex;
-          }
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          position: relative;
+          overflow: hidden;
+          padding: 28px 24px;
         }
 
+        /* ── Right panel ── */
+        .loginRight {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #fff;
+          padding: 40px 24px;
+          min-height: 0;
+        }
+
+        /* ── Sections hidden on mobile ── */
+        .login-logo    { margin-bottom: 0; }
+        .login-headline,
+        .login-features,
+        .login-stat-pills { display: none; }
+
+        /* ── Desktop layout ── */
         @media (min-width: 768px) {
-          .loginShell {
-            flex-direction: row;
-          }
-          .loginLeft {
-            width: 45%;
-            min-height: 100vh;
-          }
-          .login-stat-pills {
-            display: flex;
-          }
+          .loginShell    { flex-direction: row; min-height: 100vh; }
+          .loginLeft     { width: 44%; min-height: 100vh; padding: 48px 40px; }
+          .loginRight    { padding: 48px 40px; }
+          .login-logo    { margin-bottom: 52px; }
+          .login-headline  { display: block; }
+          .login-features  { display: flex; }
+          .login-stat-pills { display: flex; }
         }
       `}</style>
 
@@ -280,25 +292,18 @@ export default function Login() {
       <div
         className="loginLeft"
         style={{
-          background:
-            "linear-gradient(145deg, #15803d 0%, #166534 50%, #14532d 100%)",
-          position: "relative",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "40px 22px",
-          overflow: "hidden",
+          background: "linear-gradient(145deg, #15803d 0%, #166534 50%, #14532d 100%)",
         }}
       >
         <Orbs />
 
-        {/* Logo */}
+        {/* Logo — always visible */}
         <div
+          className="login-logo"
           style={{
             display: "flex",
             alignItems: "center",
             gap: "10px",
-            marginBottom: "52px",
             position: "relative",
             animation: "slideUp 0.6s ease both",
           }}
@@ -313,6 +318,7 @@ export default function Login() {
               alignItems: "center",
               justifyContent: "center",
               border: "1px solid rgba(255,255,255,0.25)",
+              flexShrink: 0,
             }}
           >
             <TrendingUp size={20} color="#fff" strokeWidth={2.5} />
@@ -330,12 +336,15 @@ export default function Login() {
           </span>
         </div>
 
-        {/* Headline */}
-        <div style={{ position: "relative", marginBottom: "36px" }}>
+        {/* Headline — desktop only */}
+        <div
+          className="login-headline"
+          style={{ position: "relative", marginBottom: "36px" }}
+        >
           <h1
             style={{
               fontFamily: "'Syne', sans-serif",
-              fontSize: "clamp(28px, 6vw, 38px)",
+              fontSize: "clamp(28px, 3.5vw, 38px)",
               fontWeight: "800",
               color: "#fff",
               lineHeight: "1.15",
@@ -361,14 +370,10 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Feature list */}
+        {/* Features — desktop only */}
         <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "10px",
-            marginBottom: "40px",
-          }}
+          className="login-features"
+          style={{ flexDirection: "column", gap: "10px", marginBottom: "40px" }}
         >
           {features.map((f, i) => (
             <div
@@ -396,32 +401,23 @@ export default function Login() {
               >
                 <Check size={11} color="#86efac" strokeWidth={3} />
               </div>
-              <span
-                style={{ color: "rgba(255,255,255,0.8)", fontSize: "14px" }}
-              >
+              <span style={{ color: "rgba(255,255,255,0.8)", fontSize: "14px" }}>
                 {f}
               </span>
             </div>
           ))}
         </div>
 
-        {/* Stat pills */}
-        <div className="login-stat-pills" style={{ gap: "10px", flexWrap: "wrap" }}>
-          <StatPill
-            icon="💸"
-            label="Avg. tracked"
-            value="₹45,000/mo"
-            delay="0.7s"
-          />
-          <StatPill
-            icon="📈"
-            label="Savings boost"
-            value="Up to 23%"
-            delay="0.8s"
-          />
+        {/* Stat pills — desktop only */}
+        <div
+          className="login-stat-pills"
+          style={{ gap: "10px", flexWrap: "wrap" }}
+        >
+          <StatPill icon="💸" label="Avg. tracked" value="₹45,000/mo" delay="0.7s" />
+          <StatPill icon="📈" label="Savings boost" value="Up to 23%" delay="0.8s" />
         </div>
 
-        {/* Bottom decorative bar */}
+        {/* Bottom shimmer bar */}
         <div
           style={{
             position: "absolute",
@@ -437,16 +433,7 @@ export default function Login() {
       </div>
 
       {/* ── RIGHT PANEL ── */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "40px 24px",
-          background: "#fff",
-        }}
-      >
+      <div className="loginRight">
         <div
           style={{
             width: "100%",
@@ -711,11 +698,7 @@ export default function Login() {
               (b, i) => (
                 <span
                   key={i}
-                  style={{
-                    fontSize: "11px",
-                    color: "#a0aec0",
-                    fontWeight: "500",
-                  }}
+                  style={{ fontSize: "11px", color: "#a0aec0", fontWeight: "500" }}
                 >
                   {b}
                 </span>
